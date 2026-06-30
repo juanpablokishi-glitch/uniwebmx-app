@@ -290,9 +290,8 @@ UNIV_DOMINIOS = {
     "UdeG": ["udg.mx"],
     "UP": ["up.edu.mx"],
     "ITESO": ["iteso.mx"],
-    "Anáhuac": ["anahuac.mx"],
     "UNAM": ["unam.mx"],
-    "Ibero": ["ibero.mx"],
+    "UAG": ["uag.mx"],
 }
 
 
@@ -751,21 +750,50 @@ def mostrar_visor_documento(username, tipo_documento, titulo_boton="Ver / Descar
 UNIVERSIDADES_DATA = {
     "Tec de Monterrey": {
         "promedio_min": 8.5,
-        "examen_min": 82,  # PAA min ~1320/1600 pts ≈ 82/100
+        "examen_min": 82,
         "tasa_historica": 25,
         "confianza": "oficial",
         "fuente": "Promedio mínimo 8.5 y PAA mínimo ~1,320/1,600 pts; tasa de aceptación ~25%.",
         "documentos": ["kardex", "ensayo", "curriculum", "cartas", "acta", "curp", "identificacion", "foto", "comprobante"],
         "documentos_extra": ["Ficha de inscripción pagada", "Resultado oficial del PAA/examen de admisión"],
+        "proceso": [
+            "Crear solicitud en solicitud.tec.mx",
+            "Pagar cuota de admisión (~$1,300 MXN)",
+            "Presentar examen PAA (o entregar SAT/ACT convertido a escala PAA)",
+            "Llenar currículo y ensayo (pesan en la decisión final, no son trámite)",
+            "Recibir resultado en ~15 días por correo y portal",
+        ],
+        "fechas_clave": "Para becas de talento académico, el PAA debe presentarse antes del 17 de enero 2026 (Medicina: 13 dic 2025). Resultados de becas: 26 feb 2026.",
+        "costos": {
+            "examen_admision": "$1,300 MXN (cuota de admisión)",
+            "reserva_de_lugar": "$7,000–$9,000 MXN según si hay beca",
+            "colegiatura": "Variable por campus/carrera — usar cotizador oficial del Tec",
+        },
+        "becas": ["Beca al Talento Académico (requiere PAA alto, varía por tipo)", "Becas socioeconómicas con préstamo educativo complementario"],
+        "notas_hugo": "El 'puntaje PAA mínimo' no es un corte único de admisión — los rangos de 1,000-1,360 que existen son requisitos de BECA, no de entrada. No los presentes como si fueran el mínimo para ser aceptado.",
     },
     "UdeG": {
         "promedio_min": 8.0,
         "examen_min": 70,
-        "tasa_historica": 34.5,
-        "confianza": "parcial",  # tasa oficial, mínimos estimados (varían por carrera/centro)
-        "fuente": "Tasa de aceptación oficial ~34.5%. El puntaje mínimo real varía por carrera y centro universitario (no es un número fijo).",
+        "tasa_historica": 33.5,
+        "confianza": "parcial",
+        "fuente": "Tasa de aceptación oficial 2026-A: 56,202 admitidos de 167,690 aspirantes (~33.5%). El puntaje mínimo real varía por carrera y centro universitario, no es un número fijo.",
         "documentos": ["kardex", "acta", "curp", "identificacion", "foto", "comprobante"],
         "documentos_extra": ["Ficha PRECOSECH / pago de derechos", "Certificado de bachillerato (no solo kárdex)"],
+        "proceso": [
+            "Registro PRECOSECH y pago de derechos",
+            "Presentar PAA del College Board (la sección de inglés no cuenta para el puntaje final)",
+            "Puntaje total = resultado PAA + promedio de bachillerato",
+            "Publicación de dictamen (varía por calendario, ~1 semana antes de inicio de clases)",
+            "Si no fue admitido: solicitar cambio a carrera con cupo disponible en los días inmediatos al dictamen",
+        ],
+        "fechas_clave": "Calendario 2026-A: dictamen publicado 12 enero 2026; inicio de clases 19 enero 2026.",
+        "costos": {
+            "examen_admision": "Costo de trámite PRECOSECH, varía por calendario — confirmar monto vigente",
+            "colegiatura": "Universidad pública, cuotas simbólicas comparadas con privadas",
+        },
+        "becas": ["Becas SEP / gobierno federal para alumnos de universidad pública (sujetas a convocatoria aparte)"],
+        "notas_hugo": "El puntaje mínimo por carrera es DINÁMICO: lo define el último aspirante admitido cada ciclo. Nunca lo presentes como una cifra fija año con año — habla de rangos históricos como referencia, no como garantía.",
     },
     "UP": {
         "promedio_min": 8.0,
@@ -775,6 +803,20 @@ UNIVERSIDADES_DATA = {
         "fuente": "No hay tasa de aceptación pública. Estimado a partir de fuentes que describen el ingreso como poco competitivo (excepto Medicina).",
         "documentos": ["kardex", "ensayo", "curriculum", "acta", "curp", "identificacion", "foto", "comprobante"],
         "documentos_extra": ["Entrevista de admisión agendada"],
+        "proceso": [
+            "Solicitud en línea (mkt.up.edu.mx)",
+            "Examen PAA del College Board",
+            "Examen psicométrico (día siguiente al PAA)",
+            "Entrevista con un miembro de la comunidad académica",
+            "Entrega de resultados",
+        ],
+        "fechas_clave": "Exámenes ordinarios 2026: mayo-junio (fechas específicas: 13, 16, 20, 23, 27, 30 de mayo). Ciencias de la Salud: fechas propias en abril-mayo.",
+        "costos": {
+            "examen_admision": "Licenciaturas/Ingenierías ~$1,250 MXN; Enfermería ~$2,400; Psicología ~$2,500; Medicina ~$4,050 (confirmar vigencia)",
+            "colegiatura": "Por crédito: ~$3,480/crédito en CDMX/GDL, ~$3,185 en Aguascalientes (~468 créditos/carrera) + seguro de orfandad ~$1,513/semestre",
+        },
+        "becas": ["Beca Panamericana (mérito académico, promedio >9.5)", "~60% de los alumnos de licenciatura tienen algún tipo de beca según la UP"],
+        "notas_hugo": "Confirma costos del examen y colegiatura con el cotizador oficial antes de dar una cifra exacta a un alumno — cambian por ciclo y campus.",
     },
     "ITESO": {
         "promedio_min": 8.0,
@@ -784,35 +826,110 @@ UNIVERSIDADES_DATA = {
         "fuente": "No hay tasa de aceptación pública. Estimado: descrita como menos competitiva que universidades públicas.",
         "documentos": ["kardex", "ensayo", "acta", "curp", "identificacion", "foto", "comprobante"],
         "documentos_extra": ["Ficha de admisión pagada"],
-    },
-    "Anáhuac": {
-        "promedio_min": 7.5,
-        "examen_min": 55,
-        "tasa_historica": 82,
-        "confianza": "estimado",
-        "fuente": "No hay tasa de aceptación pública. Estimado: la propia universidad describe su examen como poco selectivo.",
-        "documentos": ["kardex", "ensayo", "curriculum", "cartas", "acta", "curp", "identificacion", "foto", "comprobante"],
-        "documentos_extra": ["Carta de buena conducta"],
+        "proceso": [
+            "Solicitud en línea (admision.iteso.mx)",
+            "Entrega de documentos requeridos",
+            "Pago del examen (preferencial si la prepa de origen tiene convenio con ITESO)",
+            "Examen PAA presencial (en campus o en 1 de 40+ ciudades con sede)",
+            "Pase automático sin examen si la prepa es 'de convenio' y el alumno cumple el promedio requerido",
+        ],
+        "fechas_clave": "Dos convocatorias al año: ingreso enero e ingreso agosto (la mayoría de licenciaturas inician en agosto). Entrega de documentación de nuevo ingreso agosto 2026: 6, 7, 10 y 11 de agosto.",
+        "costos": {
+            "examen_admision": "~$700 MXN con convenio de prepa, ~$1,100 MXN sin convenio",
+            "curso_preparacion": "$980 MXN (opcional)",
+            "colegiatura": "Semestre entre ~$74,000 y $86,000 MXN según carga de créditos",
+        },
+        "becas": ["Beca de Excelencia Académica (automática, mejores puntajes)", "Becas socioeconómicas (requieren promedio SEP ≥80)", "Financiamiento educativo (crédito + beca combinados)"],
+        "notas_hugo": "Si el alumno viene de una prepa con convenio con ITESO y cumple el promedio, probablemente tenga pase directo sin examen — vale la pena preguntarle de qué prepa viene antes de asumir que necesita presentar PAA.",
     },
     "UNAM": {
         "promedio_min": 7.0,
-        "examen_min": 88,  # Examen propio de 120 preguntas; altamente competido, varía mucho por carrera (Medicina ~1.6% vs Contaduría ~18%)
+        "examen_min": 88,
         "tasa_historica": 9,
-        "confianza": "parcial",  # Promedio mínimo (7.0) es oficial; la tasa de aceptación es un promedio general, varía enormemente por carrera y plantel
-        "fuente": "Promedio mínimo oficial de 7.0. Tasa de aceptación general del Concurso de Selección ≈ 9%, pero varía desde ~1.6% en Medicina hasta ~18% en Contaduría según la demanda de cada carrera.",
+        "confianza": "parcial",
+        "fuente": "Promedio mínimo oficial de 7.0. Tasa de aceptación general del Concurso de Selección ≈9%, pero varía desde ~1.4% en Medicina hasta carreras de baja demanda con corte mucho menor.",
         "documentos": ["kardex", "acta", "curp", "identificacion", "foto"],
         "documentos_extra": ["Pago de derecho a examen", "Cita para registro de foto, firma y huella (biométricos)", "Examen diagnóstico de inglés (obligatorio, no elimina)"],
+        "proceso": [
+            "Registro en el portal DGAE en fechas oficiales",
+            "Elegir UNA carrera, UN sistema y UN plantel (no se puede cambiar tras confirmar)",
+            "Presentar examen de 120 preguntas (3 horas, presencial)",
+            "Resultados publicados en 'Tu Sitio' del DGAE",
+        ],
+        "fechas_clave": "Examen 2026: 18 mayo al 2 junio (primera vuelta, sistema escolarizado). Resultados: 17 julio 2026. Segunda vuelta (solo SUAyED): noviembre 2026.",
+        "costos": {
+            "examen_admision": "Cuota de derecho a examen — universidad pública, costo simbólico",
+            "colegiatura": "Universidad pública, cuota simbólica",
+        },
+        "becas": ["Becas SEP / institucionales para alumnos de universidad pública"],
+        "notas_hugo": (
+            "La UNAM NO tiene puntaje mínimo fijo: admite por mejor desempeño hasta llenar cupo. "
+            "Usa estos rangos de aciertos (sobre ~120-128 según facultad, ciclo reciente) SOLO como referencia "
+            "histórica, nunca como garantía: Médico Cirujano CU ~111-115 (la más competida, ~1.4% de aceptación "
+            "general), FES Iztacala Medicina ~108-110, Cirujano Dentista ~98, Psicología CU ~104, "
+            "Arquitectura ~95, Ciencias Genómicas ~70-80, Ingeniería Geofísica ~65-75, Filosofía/Letras "
+            "Hispánicas ~55-65, Geografía ~50-60. Aclara siempre que el corte real lo define la demanda del "
+            "ciclo en turno."
+        ),
     },
-    "Ibero": {
-        "promedio_min": 7.5,
-        "examen_min": 55,
-        "tasa_historica": 25,
-        "confianza": "parcial",  # La ponderación 60/40 es oficial; la tasa de aceptación es un rango estimado que varía por campus y programa
-        "fuente": "Admisión oficial: 60% promedio de preparatoria + 40% examen EXANI-II/EXHCOBA. Tasa de aceptación estimada entre 20% y 30% según campus y programa.",
-        "documentos": ["kardex", "acta", "curp", "foto", "identificacion", "comprobante"],
-        "documentos_extra": ["Carta compromiso firmada", "Resultado del examen EXANI-II o EXHCOBA"],
+    "UAG": {
+        "promedio_min": 7.0,
+        "examen_min": 45,
+        "tasa_historica": 80,
+        "confianza": "estimado",
+        "fuente": "Sin tasa de aceptación pública. Universidad privada más antigua de México (1935), campus principal en Zapopan, Jalisco. Examen descrito como filtro de aptitud, no muy selectivo salvo Medicina.",
+        "documentos": ["kardex", "acta", "curp", "identificacion", "foto", "comprobante"],
+        "documentos_extra": ["Autobiografía (mínimo 2 páginas)"],
+        "proceso": [
+            "Llenar solicitud en admision.uag.mx",
+            "Adjuntar autobiografía, acta de nacimiento, fotografía, certificado/constancia de bachillerato con promedio, comprobante de domicilio",
+            "Agendar y presentar examen de admisión (PAA del College Board; Medicina puede pedir examen de conocimientos adicional)",
+            "Si aprueba: recibe formato de inscripción y entrega documentos de forma presencial",
+            "Pago de colegiatura y entrega de credencial",
+        ],
+        "fechas_clave": "Dos convocatorias al año. Fechas exactas varían entre fuentes (apertura reportada en noviembre o en febrero según el ciclo) — confirmar directamente en uag.mx antes de comunicar a una prepa.",
+        "costos": {
+            "examen_admision": "~$950 MXN (incluye solicitud, examen y credencial de aspirante)",
+            "colegiatura": "Mensualidad ~$9,000–$23,000 MXN según carrera (~$170,000–$240,000 MXN al año). Medicina y Cirujano Dentista tienen esquema propio, más alto.",
+        },
+        "becas": ["Beca de Excelencia Académica (promedio >9.0 + buen examen)", "Becas deportivas y culturales", "Convenios empresariales/institucionales — ~1 de cada 5 alumnos tiene algún apoyo"],
+        "notas_hugo": "Es la universidad privada más antigua de México y tiene su campus principal en Zapopan — muy relevante para alumnos de Guadalajara. Confirma siempre las fechas de convocatoria vigentes antes de darlas como definitivas, las fuentes no coinciden entre sí.",
     },
 }
+
+
+def construir_contexto_universidades(universidades_interes=None):
+    """
+    Arma un bloque de texto con la información verificada de UNIVERSIDADES_DATA
+    para inyectarla al contexto de Hugo. Si el alumno ya eligió universidades de
+    interés, solo manda esas (para no inflar tokens); si no, manda todas.
+    """
+    if universidades_interes:
+        nombres = [u for u in universidades_interes if u in UNIVERSIDADES_DATA]
+        if not nombres:
+            nombres = list(UNIVERSIDADES_DATA.keys())
+    else:
+        nombres = list(UNIVERSIDADES_DATA.keys())
+
+    bloques = []
+    for nombre in nombres:
+        datos = UNIVERSIDADES_DATA[nombre]
+        costos_txt = "; ".join(f"{k}: {v}" for k, v in datos.get("costos", {}).items())
+        becas_txt = "; ".join(datos.get("becas", []))
+        proceso_txt = " → ".join(datos.get("proceso", []))
+        bloques.append(
+            f"### {nombre} (confianza del dato: {datos['confianza']})\n"
+            f"- Fuente: {datos['fuente']}\n"
+            f"- Promedio mínimo de bachillerato: {datos['promedio_min']}\n"
+            f"- Proceso de admisión: {proceso_txt}\n"
+            f"- Fechas clave 2026: {datos.get('fechas_clave', 'No disponible, consultar con la universidad.')}\n"
+            f"- Costos de referencia: {costos_txt or 'No disponible.'}\n"
+            f"- Becas principales: {becas_txt or 'No disponible.'}\n"
+            f"- Documentos requeridos: {', '.join(datos.get('documentos', []))}\n"
+            f"- INSTRUCCIÓN ESPECÍFICA: {datos.get('notas_hugo', '')}"
+        )
+    return "\n\n".join(bloques)
+
 
 # Nombres legibles de cada documento "tipo locker" (para armar las carpetas por universidad)
 DOCUMENTOS_LOCKER_INFO = {
@@ -1775,10 +1892,10 @@ elif st.session_state.page == "ranking":
             "color": "#003057",
         },
         {
-            "pos": 3, "nombre": "Universidad Iberoamericana", "tipo": "Privada", "qs": "#851–900 mundial",
-            "aceptacion": "~20–30%", "colegiatura": "$134k–$178k / semestre",
-            "examen": "EXANI-II o EXHCOBA (60% prom. + 40% examen)",
-            "fortalezas": "Comunicación · Diseño · Psicología · Derecho",
+            "pos": 3, "nombre": "UAG (Universidad Autónoma de Guadalajara)", "tipo": "Privada", "qs": "#1201–1400 mundial",
+            "aceptacion": "~80%", "colegiatura": "$27k–$69k / semestre (según carrera)",
+            "examen": "PAA (College Board) + autobiografía",
+            "fortalezas": "Medicina · Odontología · Negocios · Arquitectura",
             "color": "#2C2C2C",
         },
         {
@@ -1789,21 +1906,14 @@ elif st.session_state.page == "ranking":
             "color": "#5A1A1A",
         },
         {
-            "pos": 5, "nombre": "Universidad Anáhuac", "tipo": "Privada", "qs": "#951–1000 mundial",
-            "aceptacion": "~82%", "colegiatura": "$155k–$200k / semestre",
-            "examen": "PAA + entrevista personal",
-            "fortalezas": "Negocios · Medicina · Arte y Diseño · Derecho",
-            "color": "#4A2060",
-        },
-        {
-            "pos": 6, "nombre": "Universidad de Guadalajara (UdeG)", "tipo": "Pública", "qs": "#1001–1200 mundial",
+            "pos": 5, "nombre": "Universidad de Guadalajara (UdeG)", "tipo": "Pública", "qs": "#1001–1200 mundial",
             "aceptacion": "~34.5%", "colegiatura": "Gratuita (cuota mínima)",
             "examen": "CUAAD / examen propio por centro universitario",
             "fortalezas": "Ciencias de la Salud · Exactas · Sociales · Artes",
             "color": "#1B4D3E",
         },
         {
-            "pos": 7, "nombre": "ITESO", "tipo": "Privada", "qs": "#1201–1400 mundial",
+            "pos": 6, "nombre": "ITESO", "tipo": "Privada", "qs": "#1201–1400 mundial",
             "aceptacion": "~75%", "colegiatura": "$90k–$130k / semestre",
             "examen": "Examen propio + ficha de admisión",
             "fortalezas": "Ingeniería · Negocios · Diseño · Comunicación",
@@ -1860,16 +1970,16 @@ elif st.session_state.page == "blog":
         {
             "tag": "Costos",
             "titulo": "Cuánto cuesta realmente estudiar en las universidades privadas top de México",
-            "resumen": "Muchos aspirantes se enfocan en la colegiatura pero olvidan los gastos asociados. En el Tec de Monterrey el semestre va de $155k a $189k MXN dependiendo del campus, pero hay que sumar seguro médico, materiales y, si te mudas, aproximadamente $6,400 mensuales en vivienda. La UP es técnicamente la más cara del país en 2026 con $177k por semestre, seguida de Anáhuac ($163k) e Ibero ($159k).",
+            "resumen": "Muchos aspirantes se enfocan en la colegiatura pero olvidan los gastos asociados. En el Tec de Monterrey el semestre va de $155k a $189k MXN dependiendo del campus, pero hay que sumar seguro médico, materiales y, si te mudas, aproximadamente $6,400 mensuales en vivienda. La UP es técnicamente la más cara del país en 2026 con $177k por semestre, mientras que UAG es de las opciones privadas más accesibles en Guadalajara, con semestres desde $27k MXN según la carrera.",
             "minutos": "4 min",
             "datos": ["UP: $177k/sem (la más cara)", "Tec: $155k–$189k/sem", "UdeG y UNAM: prácticamente gratuitas"],
         },
         {
             "tag": "Estrategia",
             "titulo": "Qué buscan realmente las universidades en tu expediente",
-            "resumen": "Las privadas top valoran tres cosas sobre todo: consistencia académica (no perfección, sino tendencia), actividades extracurriculares con compromiso real (no una lista de logros de una sola vez), y un ensayo personal que conecte tu historia con tu carrera elegida. En el Tec, el PAA pesa mucho; en la Ibero, la ponderación es 60% promedio + 40% examen. Conocer la fórmula de cada universidad te permite enfocar tus energías correctamente.",
+            "resumen": "Las privadas top valoran tres cosas sobre todo: consistencia académica (no perfección, sino tendencia), actividades extracurriculares con compromiso real (no una lista de logros de una sola vez), y un ensayo personal que conecte tu historia con tu carrera elegida. En el Tec, el PAA pesa mucho; en la UAG, la autobiografía es parte central del expediente. Conocer la fórmula de cada universidad te permite enfocar tus energías correctamente.",
             "minutos": "6 min",
-            "datos": ["Ibero: 60% promedio + 40% examen", "Tec: PAA mínimo 1,320 pts", "UNAM: solo aciertos, sin promedio"],
+            "datos": ["UAG: autobiografía + PAA", "Tec: PAA mínimo 1,320 pts", "UNAM: solo aciertos, sin promedio"],
         },
         {
             "tag": "Guía",
@@ -2816,6 +2926,16 @@ elif st.session_state.page == "chat":
                     if contenido_ensayo:
                         partes_contexto.append(f"--- ENSAYO DE MOTIVOS DEL ALUMNO ---\n{contenido_ensayo}")
 
+                    # --- BASE DE CONOCIMIENTO VERIFICADA DE UNIVERSIDADES ---
+                    # Antes Hugo solo usaba esta info en el simulador. Ahora se manda en
+                    # cada mensaje del chat para que sus respuestas estén ancladas a datos
+                    # reales y no a lo que Gemini "recuerde" de memoria (que puede estar
+                    # desactualizado o inventado).
+                    universidades_interes_alumno = st.session_state.get("perfil_universidades_interes", [])
+                    contexto_unis = construir_contexto_universidades(universidades_interes_alumno)
+                    if contexto_unis:
+                        partes_contexto.append(f"--- BASE DE CONOCIMIENTO VERIFICADA DE UNIVERSIDADES ---\n{contexto_unis}")
+
                     info_doc = ""
                     if partes_contexto:
                         info_doc = "\n\n[CONTEXTO DEL ALUMNO]\n" + "\n\n".join(partes_contexto)
@@ -2837,7 +2957,20 @@ elif st.session_state.page == "chat":
                             "Usa el perfil del alumno (nombre, edad, carreras de interés, universidades de "
                             "interés) y el contexto de documentos (si está disponible) para dar "
                             "retroalimentación específica y personalizada, no genérica. Dirígete al alumno "
-                            "por su nombre cuando lo tengas disponible."
+                            "por su nombre cuando lo tengas disponible.\n\n"
+                            "REGLAS SOBRE DATOS DE UNIVERSIDADES (muy importantes):\n"
+                            "1. Cuando hables de requisitos, puntajes, costos, fechas o becas de una "
+                            "universidad, básate SIEMPRE en la 'BASE DE CONOCIMIENTO VERIFICADA DE "
+                            "UNIVERSIDADES' que viene en el contexto. No inventes ni completes con tu "
+                            "conocimiento general si el dato no está ahí.\n"
+                            "2. Respeta el nivel de confianza de cada dato: si dice 'oficial', puedes "
+                            "darlo con seguridad; si dice 'parcial' o 'estimado', acláraselo al alumno "
+                            "(ej. 'esto es un rango de referencia, no un mínimo garantizado').\n"
+                            "3. Sigue al pie de la letra cualquier 'INSTRUCCIÓN ESPECÍFICA' que venga "
+                            "junto a una universidad en la base de conocimiento.\n"
+                            "4. Si te preguntan sobre una universidad que no está en tu base de "
+                            "conocimiento, dilo explícitamente y ofrece ayudar con lo que sí tienes "
+                            "verificado, en vez de inventar cifras."
                         ),
                     )
                     chat = model.start_chat(history=historial_gemini)
