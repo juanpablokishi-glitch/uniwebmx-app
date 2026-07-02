@@ -43,6 +43,50 @@ def _enviar_correo(to: str, subject: str, html: str):
         print(f"[Resend ERROR] No se pudo enviar a {to}: {e}")
 
 
+# --- ALERTAS DE ERROR AL ADMIN ---
+# Requiere el secret ADMIN_EMAIL en Streamlit Cloud (Settings > Secrets):
+#   ADMIN_EMAIL = "tu_correo@ejemplo.com"
+# Si no está configurado, las alertas simplemente no se envían (no truena la app).
+import traceback as _traceback_mod
+
+_ULTIMA_ALERTA_POR_CONTEXTO = {}  # antispam: no mandar el mismo error 50 veces seguidas
+
+def _notificar_error_admin(contexto: str, error: Exception, extra: str = ""):
+    """Manda un correo al admin cuando algo truena en un flujo importante
+    (guardar datos, registro, login, pagos). Nunca deja que una falla aquí
+    tumbe la app: si Resend o los secrets fallan, solo se queda en consola."""
+    try:
+        _admin_correo = st.secrets.get("ADMIN_EMAIL", "")
+        if not _admin_correo:
+            print(f"[ALERTA sin enviar - falta ADMIN_EMAIL] {contexto}: {error}")
+            return
+        # Antispam simple: máximo una alerta cada 10 minutos por mismo contexto,
+        # usando cache de proceso (se resetea si la app se reinicia).
+        _ahora = datetime.now(timezone.utc)
+        _clave = contexto
+        _ultima = _ULTIMA_ALERTA_POR_CONTEXTO.get(_clave)
+        if _ultima and (_ahora - _ultima).total_seconds() < 600:
+            return
+        _ULTIMA_ALERTA_POR_CONTEXTO[_clave] = _ahora
+
+        _detalle = "".join(_traceback_mod.format_exception(type(error), error, error.__traceback__))[-3000:]
+        _enviar_correo(
+            to=_admin_correo,
+            subject=f"[Uniwebmx] Error en: {contexto}",
+            html=f"""
+            <div style="font-family:monospace;font-size:0.85rem;white-space:pre-wrap;">
+                <p><strong>Contexto:</strong> {contexto}</p>
+                <p><strong>Hora (UTC):</strong> {_ahora.isoformat()}</p>
+                {f'<p><strong>Extra:</strong> {extra}</p>' if extra else ''}
+                <p><strong>Error:</strong> {str(error)}</p>
+                <pre>{_detalle}</pre>
+            </div>
+            """,
+        )
+    except Exception as _e_interno:
+        print(f"[ALERTA falló al mandarse] {contexto}: {error} | error interno: {_e_interno}")
+
+
 def enviar_correo_bienvenida_pro(correo_usuario: str):
     """Correo de confirmación de pago Pro."""
     _enviar_correo(
@@ -236,6 +280,7 @@ def verificar_y_activar_pago(session_id, username_esperado):
         if subscription_id:
             update_data["stripe_subscription_id"] = subscription_id
         supabase_client.table("usuarios").update(update_data).eq("username", username_esperado).execute()
+        _log_evento(username_esperado, "pago_pro")
         return True
     return False
 
@@ -513,11 +558,16 @@ def save_user(username, password, email="", edad=None, es_menor_edad=False,
     except Exception as e:
         if "usuarios_username_key" in str(e) or "23505" in str(e):
             return False
-        raise
+        _notificar_error_admin("save_user (registro)", e, extra=f"username={username}")
+        return False
 
 
 def verify_user(username, password):
-    res = supabase_client.table("usuarios").select("password_hash").eq("username", username).execute()
+    try:
+        res = supabase_client.table("usuarios").select("password_hash").eq("username", username).execute()
+    except Exception as e:
+        _notificar_error_admin("verify_user (login)", e, extra=f"username={username}")
+        return False
     if res.data:
         stored_hash = res.data[0]["password_hash"].encode('utf-8')
         return bcrypt.checkpw(password.encode('utf-8'), stored_hash)
@@ -728,8 +778,11 @@ def guardar_datos_usuario(username):
                 "datos": datos,
                 "updated_at": datetime.now().isoformat()
             }).execute()
-    except Exception:
-        pass
+    except Exception as e:
+        # Antes esto fallaba en silencio (except: pass) — si Supabase tenía un
+        # problema momentáneo, se perdía el progreso del alumno sin que nadie
+        # se enterara. Ahora al menos te avisamos por correo.
+        _notificar_error_admin("guardar_datos_usuario", e, extra=f"username={username}")
 
 
 def restaurar_sesion_usuario(username):
@@ -1167,6 +1220,24 @@ if "nav" in st.query_params:
        st.session_state.pop("user", None)
        st.session_state.pop("session_token", None)
        st.session_state.page = "inicio"
+   # Estos flujos (cancelar suscripción, darse de baja de promocionales,
+   # eliminar cuenta) antes revisaban st.query_params más abajo en el archivo,
+   # pero para entonces ya se había llamado st.query_params.clear() aquí arriba
+   # y el valor nunca llegaba. Los guardamos en session_state en su lugar.
+   elif _nav_target == "__cancelar_sub__":
+       st.session_state["_confirmar_cancelacion"] = True
+   elif _nav_target == "__ejecutar_cancelacion__":
+       st.session_state["_ejecutar_cancelacion_pendiente"] = True
+   elif _nav_target == "__baja_promocional__":
+       st.session_state["_ejecutar_baja_promocional_pendiente"] = True
+   elif _nav_target == "__eliminar_cuenta__":
+       st.session_state["_confirmar_eliminacion"] = True
+   elif _nav_target == "__ejecutar_eliminacion__":
+       st.session_state["_ejecutar_eliminacion_pendiente"] = True
+   elif _nav_target == "__descartar_accion_cuenta__":
+       st.session_state["_mostrar_confirmar_cancelacion"] = False
+       st.session_state["_mostrar_confirmar_eliminacion"] = False
+       st.session_state.page = "locker"
    elif _nav_token:
        _usuario_validado = validar_sesion_token(_nav_token)
        if _usuario_validado:
@@ -1789,6 +1860,34 @@ if es_hub:
              </a>
            </div>""" if _plan_actual == "pro" else ""
 
+       # --- Item: darse de baja de correos promocionales ---
+       _consiente_promo_actual = st.session_state.get("consentimiento_promocional_actual", False)
+       _baja_promo_item = f"""
+           <a href="/?nav=__baja_promocional__" target="_self" style="display:flex;align-items:center;gap:8px;
+               padding:7px 10px;border-radius:6px;color:#555;font-family:Montserrat,sans-serif;
+               font-size:0.82rem;font-weight:400;text-decoration:none;">
+             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+               <path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/><line x1="3" y1="21" x2="21" y2="3"/>
+             </svg>Dejar de recibir promocionales
+           </a>""" if _consiente_promo_actual else """
+           <div style="padding:7px 10px;color:#AAA;font-family:Montserrat,sans-serif;font-size:0.76rem;">
+             No recibes correos promocionales
+           </div>"""
+
+       # --- Item: eliminar cuenta ---
+       _eliminar_cuenta_item = """
+           <a href="/?nav=__eliminar_cuenta__" target="_self" style="display:flex;align-items:center;gap:8px;
+               padding:7px 10px;border-radius:6px;color:#C0392B;font-family:Montserrat,sans-serif;
+               font-size:0.82rem;font-weight:500;text-decoration:none;">
+             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+               <polyline points="3 6 5 6 21 6"/>
+               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+               <path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+             </svg>Eliminar mi cuenta
+           </a>"""
+
        with st.sidebar:
            st.markdown(f"""
            <style>
@@ -1876,6 +1975,10 @@ if es_hub:
                  </svg>Cerrar sesión
                </a>
                {_cancel_item}
+               <div style="border-top:0.5px solid #EAEAEA;margin:4px 0;padding-top:4px;">
+                 {_baja_promo_item}
+                 {_eliminar_cuenta_item}
+               </div>
              </div>
 
              <label for="profile-toggle" class="profile-btn">
@@ -1897,13 +2000,12 @@ if es_hub:
            </div>
            """, unsafe_allow_html=True)
 
-           # Manejo de cancelación (nav token)
-           if st.query_params.get("nav") == "__cancelar_sub__":
-               if "_cancelar_sub_procesado" not in st.session_state:
-                   st.session_state["_confirmar_cancelacion"] = True
-                   st.session_state["_cancelar_sub_procesado"] = True
+           # Manejo de cancelación de suscripción (el flag ya se guardó arriba,
+           # en el interceptor de nav, antes de que se limpiaran los query_params)
+           if st.session_state.pop("_confirmar_cancelacion", False):
+               st.session_state["_mostrar_confirmar_cancelacion"] = True
 
-           if st.session_state.get("_confirmar_cancelacion"):
+           if st.session_state.get("_mostrar_confirmar_cancelacion"):
                with st.sidebar:
                    st.markdown("""
                    <div style="margin:0 4px;padding:12px 14px;background:#FFF5F5;border:1px solid #FECACA;
@@ -1934,14 +2036,14 @@ if es_hub:
                            text-decoration:none;background:#C0392B;color:#fff;">
                            Sí, cancelar</a>""", unsafe_allow_html=True)
                    with col_no:
-                       st.markdown("""<a href="/?nav=locker" target="_self"
+                       st.markdown("""<a href="/?nav=__descartar_accion_cuenta__" target="_self"
                            style="display:block;text-align:center;font-family:Montserrat,sans-serif;
                            font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;
                            text-decoration:none;background:#F5F5F3;color:#1A1A1A;border:1px solid #E0E0E0;">
                            Mantener</a>""", unsafe_allow_html=True)
                    st.markdown("</div>", unsafe_allow_html=True)
 
-           if st.query_params.get("nav") == "__ejecutar_cancelacion__":
+           if st.session_state.pop("_ejecutar_cancelacion_pendiente", False):
                if "_cancelacion_ejecutada" not in st.session_state:
                    try:
                        res = supabase_client.table("usuarios").select("stripe_subscription_id").eq("username", _user).execute()
@@ -1949,7 +2051,7 @@ if es_hub:
                        if sub_id:
                            stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
                            st.session_state["_cancelacion_ejecutada"] = True
-                           st.session_state["_confirmar_cancelacion"] = False
+                           st.session_state["_mostrar_confirmar_cancelacion"] = False
                            with st.sidebar:
                                st.markdown("""<div style="margin:0 4px;padding:10px 14px;background:#F0FFF4;
                                    border:1px solid #C8D4B8;border-radius:10px;font-family:Montserrat,sans-serif;
@@ -1965,6 +2067,100 @@ if es_hub:
                    except Exception as e:
                        with st.sidebar:
                            st.error(f"Error: {e}")
+                       _notificar_error_admin("cancelar suscripción", e, extra=f"username={_user}")
+
+           # --- Darse de baja de correos promocionales (acción directa, sin confirmación) ---
+           if st.session_state.pop("_ejecutar_baja_promocional_pendiente", False):
+               try:
+                   supabase_client.table("usuarios").update({"consentimiento_promocional": False}).eq("username", _user).execute()
+                   st.session_state["consentimiento_promocional_actual"] = False
+                   with st.sidebar:
+                       st.markdown("""<div style="margin:0 4px;padding:10px 14px;background:#F0FFF4;
+                           border:1px solid #C8D4B8;border-radius:10px;font-family:Montserrat,sans-serif;
+                           font-size:0.8rem;color:#4A5D32;font-weight:500;">
+                           ✓ Ya no recibirás correos promocionales.</div>""", unsafe_allow_html=True)
+               except Exception as e:
+                   with st.sidebar:
+                       st.error(f"No se pudo actualizar: {e}")
+                   _notificar_error_admin("baja de correos promocionales", e, extra=f"username={_user}")
+
+           # --- Eliminar cuenta (dos pasos: confirmar y luego ejecutar) ---
+           if st.session_state.pop("_confirmar_eliminacion", False):
+               st.session_state["_mostrar_confirmar_eliminacion"] = True
+
+           if st.session_state.get("_mostrar_confirmar_eliminacion"):
+               with st.sidebar:
+                   st.markdown("""
+                   <div style="margin:0 4px;padding:12px 14px;background:#FFF5F5;border:1px solid #FECACA;
+                       border-radius:10px;font-family:Montserrat,sans-serif;">
+                     <div style="font-size:0.82rem;font-weight:600;color:#C0392B;margin-bottom:6px;">
+                       ¿Eliminar tu cuenta?
+                     </div>
+                     <div style="font-size:0.78rem;color:#666;line-height:1.5;">
+                       Esto borra tu cuenta, tu historial con Hugo, tus resultados del simulador y todo lo
+                       demás que tengamos guardado de ti. No se puede deshacer. Si tienes Pro activo, tu
+                       suscripción también se cancela de inmediato.
+                     </div>
+                   </div>
+                   """, unsafe_allow_html=True)
+                   st.markdown("""
+                   <style>
+                   div[data-testid="stSidebarContent"] .eliminar-btns a {{
+                       display:block;text-align:center;font-family:Montserrat,sans-serif;
+                       font-size:0.82rem;font-weight:600;border-radius:8px;
+                       padding:9px 0;text-decoration:none;margin-bottom:6px;
+                   }}
+                   </style>
+                   <div class="eliminar-btns" style="margin:8px 4px 0;">
+                   """, unsafe_allow_html=True)
+                   col_si2, col_no2 = st.columns(2)
+                   with col_si2:
+                       st.markdown("""<a href="/?nav=__ejecutar_eliminacion__" target="_self"
+                           style="display:block;text-align:center;font-family:Montserrat,sans-serif;
+                           font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;
+                           text-decoration:none;background:#C0392B;color:#fff;">
+                           Sí, eliminar</a>""", unsafe_allow_html=True)
+                   with col_no2:
+                       st.markdown("""<a href="/?nav=__descartar_accion_cuenta__" target="_self"
+                           style="display:block;text-align:center;font-family:Montserrat,sans-serif;
+                           font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;
+                           text-decoration:none;background:#F5F5F3;color:#1A1A1A;border:1px solid #E0E0E0;">
+                           No, conservar</a>""", unsafe_allow_html=True)
+                   st.markdown("</div>", unsafe_allow_html=True)
+
+           if st.session_state.pop("_ejecutar_eliminacion_pendiente", False):
+               try:
+                   # 1. Si tiene suscripción activa, cancelarla YA (no al final del periodo,
+                   #    porque la cuenta está a punto de dejar de existir).
+                   try:
+                       res_sub = supabase_client.table("usuarios").select("stripe_subscription_id").eq("username", _user).execute()
+                       _sub_id_borrar = res_sub.data[0].get("stripe_subscription_id") if res_sub.data else None
+                       if _sub_id_borrar:
+                           stripe.Subscription.delete(_sub_id_borrar)
+                   except Exception as _e_stripe_del:
+                       # No bloquear el borrado de la cuenta por esto, pero sí avisarte
+                       # para que canceles esa suscripción a mano si hace falta.
+                       _notificar_error_admin("cancelar suscripción al eliminar cuenta", _e_stripe_del, extra=f"username={_user}")
+
+                   # 2. Borrar todos sus datos.
+                   supabase_client.table("datos_usuario").delete().eq("username", _user).execute()
+                   try:
+                       supabase_client.table("eventos_uso").delete().eq("username", _user).execute()
+                   except Exception:
+                       pass  # si la tabla no existe todavía, no pasa nada
+                   supabase_client.table("usuarios").delete().eq("username", _user).execute()
+
+                   # 3. Cerrar la sesión de verdad y mandarlo a una pantalla de despedida.
+                   invalidar_sesion_token(_user)
+                   st.session_state.clear()
+                   st.session_state.page = "cuenta_eliminada"
+                   st.rerun()
+               except Exception as e:
+                   _notificar_error_admin("eliminar cuenta", e, extra=f"username={_user}")
+                   with st.sidebar:
+                       st.error(f"No pudimos eliminar tu cuenta por completo: {e}. Escríbenos a hola@uniwebmx.com")
+
+
 
 # =================================================================
 # BARRA LATERAL DEL PANEL (admin / universidades) — totalmente separada
@@ -2552,8 +2748,63 @@ def _panel_responder_consultor(pregunta, df, historial):
         return f"No pude procesar tu pregunta en este momento ({e})."
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _panel_cargar_eventos(dias=30):
+    """Trae los eventos de los últimos N días desde eventos_uso. Si la tabla
+    todavía no existe (no has corrido el SQL), regresa un DataFrame vacío en
+    vez de tronar el Panel."""
+    try:
+        _desde = (datetime.now(timezone.utc) - timedelta(days=dias)).isoformat()
+        res = supabase_client.table("eventos_uso").select("username, tipo_evento, creado_en").gte("creado_en", _desde).execute()
+        df = pd.DataFrame(res.data or [])
+        if not df.empty:
+            df["fecha"] = pd.to_datetime(df["creado_en"]).dt.date
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def _panel_serie_diaria(df_eventos, tipo_evento, usernames_permitidos=None):
+    """Serie de conteo diario para un tipo de evento, opcionalmente filtrada a
+    un conjunto de usernames (para el alcance de una cuenta 'universidad')."""
+    if df_eventos.empty:
+        return pd.DataFrame(columns=["Fecha", "Eventos"]).set_index("Fecha")
+    df = df_eventos[df_eventos["tipo_evento"] == tipo_evento]
+    if usernames_permitidos is not None:
+        df = df[df["username"].isin(usernames_permitidos)]
+    if df.empty:
+        return pd.DataFrame(columns=["Fecha", "Eventos"]).set_index("Fecha")
+    serie = df.groupby("fecha").size().reset_index(name="Eventos").rename(columns={"fecha": "Fecha"})
+    return serie.set_index("Fecha")
+
+
 def rol_universidad_nombre():
     return st.session_state.get("universidad_asignada", "") or "tu universidad"
+
+
+# --- REGISTRO DE EVENTOS (para ver tendencias en el Panel) ---
+# Requiere en Supabase una tabla nueva:
+#   create table eventos_uso (
+#       id bigint generated always as identity primary key,
+#       username text,
+#       tipo_evento text not null,
+#       detalle jsonb,
+#       creado_en timestamptz not null default now()
+#   );
+# Tipos de evento que se registran: 'registro', 'login', 'mensaje_chat',
+# 'simulador_usado', 'pago_pro'.
+def _log_evento(username, tipo_evento, detalle=None):
+    """Guarda un evento con fecha/hora. Nunca debe tumbar la app si falla:
+    si la tabla no existe todavía (no has corrido el SQL de arriba) o hay
+    un problema de red, simplemente no se registra ese evento."""
+    try:
+        supabase_client.table("eventos_uso").insert({
+            "username": username,
+            "tipo_evento": tipo_evento,
+            "detalle": detalle or {},
+        }).execute()
+    except Exception:
+        pass
 
 
 def _panel_header(titulo, subtitulo=""):
@@ -2828,8 +3079,14 @@ elif st.session_state.page == "planes":
         _token_planes = crear_sesion_token(_user_planes)
         st.session_state.session_token = _token_planes
     if _logged:
-        _url_mensual = crear_sesion_stripe(st.secrets["STRIPE_PRICE_MENSUAL"], _user_planes, _token_planes)
-        _url_anual   = crear_sesion_stripe(st.secrets["STRIPE_PRICE_ANUAL"],   _user_planes, _token_planes)
+        try:
+            _url_mensual = crear_sesion_stripe(st.secrets["STRIPE_PRICE_MENSUAL"], _user_planes, _token_planes)
+            _url_anual   = crear_sesion_stripe(st.secrets["STRIPE_PRICE_ANUAL"],   _user_planes, _token_planes)
+        except Exception as e:
+            _notificar_error_admin("crear_sesion_stripe (página planes)", e, extra=f"username={_user_planes}")
+            _url_mensual = "#"
+            _url_anual = "#"
+            st.error("No pudimos conectar con la pasarela de pago en este momento. Intenta de nuevo en unos minutos.")
     else:
         _url_mensual = "/?page=login"
         _url_anual   = "/?page=login"
@@ -2999,11 +3256,13 @@ elif st.session_state.page == "registro":
                             consentimientos_fecha=datetime.now(timezone.utc).isoformat() if not _es_menor else None,
                         )
                         if not _creado_ok:
-                            # Alguien más se registró con ese username en el instante entre
-                            # nuestra revisión y el insert (carrera). No truena la página.
-                            st.error("Ese usuario se acaba de registrar por alguien más justo ahora. Intenta con otro nombre de usuario.")
+                            # Puede ser que alguien más se haya registrado con ese username justo
+                            # en este instante (carrera), o que algo haya tronado en Supabase — en
+                            # ese segundo caso ya se le avisó al admin por correo.
+                            st.error("No pudimos crear tu cuenta. Es posible que ese usuario se haya registrado justo ahora; intenta con otro nombre de usuario o vuelve a intentarlo en un momento.")
                         else:
                             enviar_correo_bienvenida_registro(_email_val)
+                            _log_evento(reg_nombre_limpio, "registro", {"es_menor_edad": _es_menor})
                             if _es_menor:
                                 _confirm_link = f"{BASE_URL}/?page=confirmar_tutor&token={_token_tutor}"
                                 enviar_correo_confirmacion_tutor(
@@ -3054,6 +3313,7 @@ elif st.session_state.page == "login":
                 st.session_state.user = _login_username
                 st.session_state.session_token = crear_sesion_token(_login_username)
                 restaurar_sesion_usuario(_login_username)
+                _log_evento(_login_username, "login")
                 # Red de seguridad: si pagó pero cerró la pestaña antes de que
                 # se confirmara el pago, lo verificamos aquí también.
                 if verificar_pago_pendiente(_login_username):
@@ -3808,6 +4068,7 @@ elif st.session_state.page == "chat":
                 st.warning("Has alcanzado tu límite diario de 20 consultas con Hugo. Intenta mañana.")
         else:
             st.session_state.historial_chat.append({"role": "user", "content": prompt_chat})
+            _log_evento(st.session_state.get("user", ""), "mensaje_chat")
             
             with st.spinner("Hugo está revisando..."):
                 try:
@@ -4009,6 +4270,7 @@ elif st.session_state.page == "simulador":
                 st.session_state.resultados_simulador = resultados
                 if get_plan() == "gratis":
                     st.session_state.simulador_usado = True
+                _log_evento(st.session_state.get("user", ""), "simulador_usado", {"universidades": list(resultados.keys())})
                 guardar_datos_usuario(st.session_state.get("user"))
 
     if "resultados_simulador" in st.session_state:
@@ -4092,7 +4354,21 @@ elif st.session_state.page == "panel_admin":
         c6.metric("Alumnos que le han hablado a Hugo", f"{_con_chat}/{_total}")
         c7.metric("Promedio de mensajes por alumno activo", round(_mensajes / _con_chat, 1) if _con_chat else 0)
 
-        st.markdown("<div style='margin-top:1.5rem;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-top:1rem;'></div>", unsafe_allow_html=True)
+        _df_export = _df_panel.copy()
+        _df_export["mensajes_a_hugo"] = _df_export["historial_chat"].apply(
+            lambda h: sum(1 for m in (h or []) if m.get("role") == "user")
+        )
+        _cols_export = ["username", "plan", "perfil_edad", "perfil_carreras", "perfil_universidades_interes",
+                        "perfil_completo", "simulador_usado", "mensajes_a_hugo"]
+        st.download_button(
+            "Descargar reporte (CSV)",
+            data=_df_export[_cols_export].to_csv(index=False).encode("utf-8"),
+            file_name=f"uniwebmx_resumen_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+        )
+
+        st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown("##### Top 5 carreras de interés")
@@ -4110,6 +4386,22 @@ elif st.session_state.page == "panel_admin":
                 st.caption("Aún no hay suficientes datos.")
 
         st.caption("Los datos se actualizan cada 5 minutos. Si acabas de registrar un alumno nuevo, puede tardar en aparecer.")
+
+        st.markdown("<div style='margin-top:2rem;'></div>", unsafe_allow_html=True)
+        st.markdown("##### Tendencia — últimos 30 días")
+        _usernames_scope = set(_df_panel["username"]) if es_universidad() else None
+        _eventos_30d = _panel_cargar_eventos(30)
+        if _eventos_30d.empty:
+            st.caption("Todavía no hay eventos registrados con fecha. Esto empieza a llenarse a partir de ahora (registros, logins, mensajes a Hugo, uso del simulador).")
+        else:
+            _tabs_tend = st.tabs(["Registros", "Logins", "Mensajes a Hugo", "Uso del simulador"])
+            for _tab, _tipo in zip(_tabs_tend, ["registro", "login", "mensaje_chat", "simulador_usado"]):
+                with _tab:
+                    _serie = _panel_serie_diaria(_eventos_30d, _tipo, _usernames_scope)
+                    if _serie.empty:
+                        st.caption("Sin datos todavía en los últimos 30 días.")
+                    else:
+                        st.line_chart(_serie)
 
 # --- VISTA: USO DE HUGO (CHAT) ---
 elif st.session_state.page == "panel_chat":
@@ -4137,6 +4429,15 @@ elif st.session_state.page == "panel_chat":
         else:
             st.caption("Todavía nadie le ha escrito a Hugo en este alcance.")
         st.caption("Nota: el 'contador diario' se reinicia cada día, así que puede ser menor a los mensajes totales acumulados.")
+
+        st.markdown("<div style='margin-top:1.5rem;'></div>", unsafe_allow_html=True)
+        st.markdown("##### Mensajes a Hugo por día (últimos 30 días)")
+        _usernames_scope_chat = set(_df_panel["username"]) if es_universidad() else None
+        _serie_chat = _panel_serie_diaria(_panel_cargar_eventos(30), "mensaje_chat", _usernames_scope_chat)
+        if _serie_chat.empty:
+            st.caption("Todavía no hay suficientes datos de los últimos 30 días.")
+        else:
+            st.line_chart(_serie_chat)
 
 # --- VISTA: USO DEL SIMULADOR ---
 elif st.session_state.page == "panel_simulador":
@@ -4166,6 +4467,15 @@ elif st.session_state.page == "panel_simulador":
         else:
             st.caption("Todavía no hay suficientes resultados del simulador en este alcance.")
 
+        st.markdown("<div style='margin-top:1.5rem;'></div>", unsafe_allow_html=True)
+        st.markdown("##### Uso del simulador por día (últimos 30 días)")
+        _usernames_scope_sim = set(_df_panel["username"]) if es_universidad() else None
+        _serie_sim = _panel_serie_diaria(_panel_cargar_eventos(30), "simulador_usado", _usernames_scope_sim)
+        if _serie_sim.empty:
+            st.caption("Todavía no hay suficientes datos de los últimos 30 días.")
+        else:
+            st.line_chart(_serie_sim)
+
 # --- VISTA: CARRERAS Y UNIVERSIDADES ---
 elif st.session_state.page == "panel_carreras":
     _df_panel = _panel_dataframe_alumnos()
@@ -4178,16 +4488,32 @@ elif st.session_state.page == "panel_carreras":
             st.markdown("##### Top carreras de interés")
             _tc = _panel_contar_frecuencias(_df_panel, "perfil_carreras")
             if _tc:
-                st.bar_chart(pd.DataFrame(list(_tc.items()), columns=["Carrera", "Alumnos"]).set_index("Carrera"))
-                st.dataframe(pd.DataFrame(list(_tc.items()), columns=["Carrera", "Alumnos"]), use_container_width=True, hide_index=True)
+                _df_tc = pd.DataFrame(list(_tc.items()), columns=["Carrera", "Alumnos"])
+                st.bar_chart(_df_tc.set_index("Carrera"))
+                st.dataframe(_df_tc, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Descargar carreras (CSV)",
+                    data=_df_tc.to_csv(index=False).encode("utf-8"),
+                    file_name="uniwebmx_top_carreras.csv",
+                    mime="text/csv",
+                    key="dl_carreras",
+                )
             else:
                 st.caption("Aún no hay suficientes datos.")
         with col_b:
             st.markdown("##### Top universidades de interés")
             _tu = _panel_universidades_de_interes(_df_panel)
             if _tu:
-                st.bar_chart(pd.DataFrame(list(_tu.items()), columns=["Universidad", "Alumnos"]).set_index("Universidad"))
-                st.dataframe(pd.DataFrame(list(_tu.items()), columns=["Universidad", "Alumnos"]), use_container_width=True, hide_index=True)
+                _df_tu = pd.DataFrame(list(_tu.items()), columns=["Universidad", "Alumnos"])
+                st.bar_chart(_df_tu.set_index("Universidad"))
+                st.dataframe(_df_tu, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Descargar universidades (CSV)",
+                    data=_df_tu.to_csv(index=False).encode("utf-8"),
+                    file_name="uniwebmx_top_universidades.csv",
+                    mime="text/csv",
+                    key="dl_universidades",
+                )
             else:
                 st.caption("Aún no hay suficientes datos.")
 
@@ -4217,6 +4543,19 @@ elif st.session_state.page == "panel_perfiles":
                         font-size:0.9rem;color:#333;line-height:1.6;margin-top:0.5rem;">
                         <strong style="color:#4A5D32;">Hugo dice:</strong> {st.session_state.get(_clave_cache, "")}
                         </div>""", unsafe_allow_html=True)
+                    _texto_descarga = (
+                        f"Perfil de alumnos interesados en {_uni} — Uniwebmx\n"
+                        f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+                        f"Alumnos analizados: {len(_sub)}\n\n"
+                        f"{st.session_state.get(_clave_cache, '')}\n"
+                    )
+                    st.download_button(
+                        "Descargar este análisis (.txt)",
+                        data=_texto_descarga.encode("utf-8"),
+                        file_name=f"perfil_{_uni.replace(' ', '_')}.txt",
+                        mime="text/plain",
+                        key=f"dl_{_clave_cache}",
+                    )
                 else:
                     st.caption("Da clic para que Hugo te resuma el perfil típico de quienes aplican aquí.")
 
@@ -4419,6 +4758,21 @@ elif st.session_state.page == "terminos":
     </div>
     """, unsafe_allow_html=True)
     st.markdown(TERMINOS_MD)
+
+# --- VISTA: CUENTA ELIMINADA ---
+elif st.session_state.page == "cuenta_eliminada":
+    st.markdown("""
+    <div style="max-width:520px;margin:4rem auto;text-align:center;">
+        <h1 style="font-size:1.8rem;font-weight:700;color:#1A1A1A;margin-bottom:0.8rem;">Tu cuenta fue eliminada</h1>
+        <p style="font-size:0.95rem;color:#666;line-height:1.6;margin-bottom:2rem;">
+            Borramos tu cuenta, tu historial con Hugo, tus resultados del simulador y el resto de tu
+            información. Si cambias de opinión, siempre puedes crear una cuenta nueva.
+        </p>
+        <a href="/?page=inicio" target="_self" style="display:inline-block;background:#4A5D32;color:#fff;
+            padding:12px 28px;border-radius:8px;text-decoration:none;font-family:Montserrat,sans-serif;
+            font-size:0.9rem;font-weight:600;">Volver al inicio</a>
+    </div>
+    """, unsafe_allow_html=True)
 
 # =================================================================
 # PIE DE PÁGINA (SOLO PÚBLICO)
