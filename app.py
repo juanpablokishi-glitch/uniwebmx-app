@@ -119,11 +119,14 @@ def enviar_correo_bienvenida_registro(correo_usuario: str):
     )
 
 
-def enviar_correo_consentimiento_tutor(correo_tutor: str, nombre_tutor: str, username_alumno: str, correo_alumno: str, fecha_consentimiento: str):
-    """Correo de constancia enviado al padre/madre/tutor tras registrar a un alumno menor de edad."""
+def enviar_correo_confirmacion_tutor(correo_tutor: str, nombre_tutor: str, username_alumno: str, correo_alumno: str, confirm_link: str):
+    """Correo con enlace de confirmación (doble opt-in) enviado al padre/madre/tutor
+    tras registrar a un alumno menor de edad. Mientras no se confirme, las
+    finalidades secundarias (entrenar a Hugo, compartir con universidades)
+    permanecen desactivadas para esa cuenta."""
     _enviar_correo(
         to=correo_tutor,
-        subject="Constancia de autorización — cuenta de Uniwebmx de tu hijo/a o representado/a",
+        subject="Confirma la cuenta de Uniwebmx de tu hijo/a o representado/a",
         html=f"""
         <div style="font-family:Montserrat,Arial,sans-serif;max-width:560px;margin:0 auto;
             background:#ffffff;border:1px solid #EAEAEA;border-radius:16px;overflow:hidden;">
@@ -132,38 +135,54 @@ def enviar_correo_consentimiento_tutor(correo_tutor: str, nombre_tutor: str, use
         </div>
             <div style="padding:0 32px 36px;">
             <h1 style="font-size:1.4rem;font-weight:700;color:#1A1A1A;margin-bottom:0.75rem;">
-                Constancia de autorización
+                Confirma tu autorización
             </h1>
             <p style="font-size:0.95rem;color:#444;line-height:1.7;margin-bottom:1rem;">
-                Hola{f' {nombre_tutor}' if nombre_tutor else ''}, te escribimos porque este correo fue registrado
-                como el de padre, madre o tutor legal de un usuario menor de edad en Uniwebmx.
+                Hola{f' {nombre_tutor}' if nombre_tutor else ''}, este correo fue registrado como el de padre,
+                madre o tutor legal de un usuario menor de edad en Uniwebmx.
             </p>
             <table style="width:100%;border-collapse:collapse;margin-bottom:1.5rem;">
                 <tr><td style="padding:8px 0;border-bottom:1px solid #F0F0F0;font-size:0.9rem;color:#444;">Usuario del alumno: <strong>{username_alumno}</strong></td></tr>
-                <tr><td style="padding:8px 0;border-bottom:1px solid #F0F0F0;font-size:0.9rem;color:#444;">Correo del alumno: <strong>{correo_alumno}</strong></td></tr>
-                <tr><td style="padding:8px 0;font-size:0.9rem;color:#444;">Fecha de autorización: <strong>{fecha_consentimiento}</strong></td></tr>
+                <tr><td style="padding:8px 0;font-size:0.9rem;color:#444;">Correo del alumno: <strong>{correo_alumno}</strong></td></tr>
             </table>
             <p style="font-size:0.95rem;color:#444;line-height:1.7;margin-bottom:1.5rem;">
-                Al momento del registro, se indicó que tú autorizaste en representación del alumno el uso de la
-                plataforma, aceptando el Aviso de Privacidad y los Términos y Condiciones. Puedes revisarlos
-                aquí:
+                El alumno ya puede usar las funciones básicas de la plataforma. Para habilitar funciones
+                adicionales que involucran el uso de sus datos (como que sus conversaciones con Hugo ayuden a
+                mejorar el asistente, o compartir su información con universidades), necesitamos que confirmes
+                tu autorización y decidas cada una por separado:
             </p>
-            <a href="{BASE_URL}/?page=aviso_privacidad" style="display:inline-block;color:#4A5D32;
-                font-size:0.88rem;font-weight:600;text-decoration:none;margin-bottom:10px;">
-                Ver Aviso de Privacidad →
-            </a><br>
-            <a href="{BASE_URL}/?page=terminos" style="display:inline-block;color:#4A5D32;
-                font-size:0.88rem;font-weight:600;text-decoration:none;margin-bottom:1.5rem;">
-                Ver Términos y Condiciones →
+            <a href="{confirm_link}" style="display:inline-block;background:#4A5D32;color:#fff;
+                font-size:0.9rem;font-weight:600;padding:13px 32px;border-radius:8px;
+                text-decoration:none;letter-spacing:0.01em;margin-bottom:1.5rem;">
+                Revisar y confirmar
             </a>
             <p style="font-size:0.78rem;color:#999;margin-top:1.5rem;line-height:1.6;">
-                Si tú no autorizaste este registro, o quieres revocar tu consentimiento, acceder, corregir o
-                eliminar los datos del alumno, escríbenos respondiendo este correo.<br>— El equipo de Uniwebmx
+                Este enlace es válido por 7 días. Si tú no autorizaste este registro, ignora este correo o
+                escríbenos para solicitar que eliminemos la cuenta.<br>— El equipo de Uniwebmx
             </p>
             </div>
         </div>
         """,
     )
+
+
+def guardar_conversacion_entrenamiento(username, mensaje_usuario, respuesta_hugo):
+    """Guarda un intercambio con Hugo en la tabla de entrenamiento. Solo se debe
+    llamar cuando el usuario (o su tutor, si es menor de edad) dio consentimiento
+    explícito para la finalidad secundaria 6.1 (mejorar/entrenar a Hugo).
+
+    Requiere en Supabase la tabla "hugo_entrenamiento" con columnas:
+    username (text), mensaje_usuario (text), respuesta_hugo (text),
+    created_at (timestamptz, default now()).
+    """
+    try:
+        supabase_client.table("hugo_entrenamiento").insert({
+            "username": username,
+            "mensaje_usuario": mensaje_usuario,
+            "respuesta_hugo": respuesta_hugo,
+        }).execute()
+    except Exception as e:
+        print(f"[hugo_entrenamiento ERROR] No se pudo guardar la conversación de {username}: {e}")
 
 # URL base de la app. En local usa localhost; en producción, define BASE_URL en tus secrets
 # (ej. BASE_URL = "https://tuapp.streamlit.app") para que Stripe regrese al lugar correcto.
@@ -437,16 +456,32 @@ def load_users():
 
 def save_user(username, password, email="", edad=None, es_menor_edad=False,
               tutor_nombre="", tutor_email="", tutor_consentimiento=False,
-              tutor_consentimiento_fecha=None):
+              tutor_confirm_token=None, tutor_confirm_token_expiry=None,
+              consentimiento_hugo=False, consentimiento_universidades=False,
+              consentimiento_promocional=False, consentimientos_fecha=None):
     """
-    Guarda un nuevo usuario. Si es menor de edad, además guarda los datos de
-    contacto del padre/madre/tutor y la constancia de su consentimiento.
+    Guarda un nuevo usuario.
+
+    Si es menor de edad: se guardan los datos de contacto del padre/madre/tutor
+    y el checkbox declarado en el registro (tutor_consentimiento), pero las
+    finalidades secundarias (consentimiento_hugo/universidades/promocional)
+    quedan en False hasta que el tutor confirme por correo (doble opt-in,
+    ver vista "confirmar_tutor") usando tutor_confirm_token.
+
+    Si es mayor de edad: consentimiento_hugo/universidades/promocional se
+    guardan directo, según lo que haya marcado en el registro.
 
     Requiere en Supabase, tabla "usuarios", las columnas adicionales:
     edad (int, nullable), es_menor_edad (bool, default false),
     tutor_nombre (text, nullable), tutor_email (text, nullable),
     tutor_consentimiento (bool, default false),
-    tutor_consentimiento_fecha (timestamptz, nullable).
+    tutor_confirmado (bool, default false),
+    tutor_confirm_token (text, nullable),
+    tutor_confirm_token_expiry (timestamptz, nullable),
+    consentimiento_hugo (bool, default false),
+    consentimiento_universidades (bool, default false),
+    consentimiento_promocional (bool, default false),
+    consentimientos_fecha (timestamptz, nullable).
     """
     hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     datos_usuario = {
@@ -459,9 +494,27 @@ def save_user(username, password, email="", edad=None, es_menor_edad=False,
         "tutor_nombre": tutor_nombre,
         "tutor_email": tutor_email,
         "tutor_consentimiento": tutor_consentimiento,
-        "tutor_consentimiento_fecha": tutor_consentimiento_fecha,
+        "tutor_confirmado": False,
+        "tutor_confirm_token": tutor_confirm_token,
+        "tutor_confirm_token_expiry": tutor_confirm_token_expiry,
+        "consentimiento_hugo": consentimiento_hugo,
+        "consentimiento_universidades": consentimiento_universidades,
+        "consentimiento_promocional": consentimiento_promocional,
+        "consentimientos_fecha": consentimientos_fecha,
     }
-    supabase_client.table("usuarios").upsert(datos_usuario).execute()
+    # IMPORTANTE: usamos insert() y no upsert(). Un registro nuevo NUNCA debe poder
+    # sobreescribir una cuenta existente (eso borraría su password_hash, plan, etc.
+    # si dos personas coincidieran en username). Si alguien más ganó la carrera y
+    # ya existe ese username (choque de "usuarios_username_key"), devolvemos False
+    # en vez de dejar que el error tumbe la página.
+    try:
+        supabase_client.table("usuarios").insert(datos_usuario).execute()
+        return True
+    except Exception as e:
+        if "usuarios_username_key" in str(e) or "23505" in str(e):
+            return False
+        raise
+
 
 def verify_user(username, password):
     res = supabase_client.table("usuarios").select("password_hash").eq("username", username).execute()
@@ -630,22 +683,27 @@ def guardar_datos_usuario(username):
     """Toma lo relevante de session_state y lo persiste en Supabase para ese usuario."""
     if not username:
         return
+    # Los usuarios menores de edad NO tienen Locker Digital persistente: sus documentos
+    # (incluyendo identificaciones y comprobantes sensibles) solo viven en session_state
+    # durante la sesión activa y nunca se guardan en Supabase.
+    _es_menor_guardado = es_usuario_menor()
+    _doc_vacio = {"nombre": None, "contenido": ""}
     datos = {
         "historial_chat": st.session_state.get("historial_chat", []),
         "contador_consultas": st.session_state.get("contador_consultas", 0),
         "fecha_contador": st.session_state.get("fecha_contador", ""),
         # Documentos académicos
-        "kardex": st.session_state.get("kárdex", {"nombre": None, "contenido": ""}),
-        "ensayo": st.session_state.get("ensayo", {"nombre": None, "contenido": ""}),
-        "curriculum": st.session_state.get("curriculum", {"nombre": None, "contenido": ""}),
-        "cartas": st.session_state.get("cartas", {"nombre": None, "contenido": ""}),
-        "portafolio": st.session_state.get("portafolio", {"nombre": None, "contenido": ""}),
+        "kardex": _doc_vacio if _es_menor_guardado else st.session_state.get("kárdex", _doc_vacio),
+        "ensayo": _doc_vacio if _es_menor_guardado else st.session_state.get("ensayo", _doc_vacio),
+        "curriculum": _doc_vacio if _es_menor_guardado else st.session_state.get("curriculum", _doc_vacio),
+        "cartas": _doc_vacio if _es_menor_guardado else st.session_state.get("cartas", _doc_vacio),
+        "portafolio": _doc_vacio if _es_menor_guardado else st.session_state.get("portafolio", _doc_vacio),
         # Documentos personales
-        "acta": st.session_state.get("acta", {"nombre": None, "contenido": ""}),
-        "curp": st.session_state.get("curp", {"nombre": None, "contenido": ""}),
-        "identificacion": st.session_state.get("identificacion", {"nombre": None, "contenido": ""}),
-        "foto": st.session_state.get("foto", {"nombre": None, "contenido": ""}),
-        "comprobante": st.session_state.get("comprobante", {"nombre": None, "contenido": ""}),
+        "acta": _doc_vacio if _es_menor_guardado else st.session_state.get("acta", _doc_vacio),
+        "curp": _doc_vacio if _es_menor_guardado else st.session_state.get("curp", _doc_vacio),
+        "identificacion": _doc_vacio if _es_menor_guardado else st.session_state.get("identificacion", _doc_vacio),
+        "foto": _doc_vacio if _es_menor_guardado else st.session_state.get("foto", _doc_vacio),
+        "comprobante": _doc_vacio if _es_menor_guardado else st.session_state.get("comprobante", _doc_vacio),
         "resultados_simulador": st.session_state.get("resultados_simulador", None),
         "unis_seleccionadas": st.session_state.get("unis_seleccionadas", []),
         "correo_conectado": st.session_state.get("correo_conectado", ""),
@@ -712,6 +770,73 @@ def restaurar_sesion_usuario(username):
     st.session_state.simulador_usado = datos.get("simulador_usado", False)
     # Plan del usuario
     st.session_state.plan_usuario = obtener_plan_usuario(username)
+    # Estatus de menor de edad y consentimiento del tutor (se leen directo de "usuarios",
+    # no de "datos_usuario", porque son datos de cuenta, no de progreso).
+    try:
+        _res_menor = supabase_client.table("usuarios").select(
+            "es_menor_edad, tutor_confirmado, tutor_nombre, tutor_email, "
+            "consentimiento_hugo, consentimiento_universidades, consentimiento_promocional, "
+            "rol, universidad_asignada"
+        ).eq("username", username).execute()
+        if _res_menor.data:
+            _row_menor = _res_menor.data[0]
+            st.session_state.es_menor_edad_actual = bool(_row_menor.get("es_menor_edad", False))
+            st.session_state.tutor_confirmado_actual = bool(_row_menor.get("tutor_confirmado", False))
+            st.session_state.tutor_nombre_actual = _row_menor.get("tutor_nombre", "") or ""
+            st.session_state.tutor_email_actual = _row_menor.get("tutor_email", "") or ""
+            st.session_state.consentimiento_hugo_actual = bool(_row_menor.get("consentimiento_hugo", False))
+            st.session_state.consentimiento_universidades_actual = bool(_row_menor.get("consentimiento_universidades", False))
+            st.session_state.consentimiento_promocional_actual = bool(_row_menor.get("consentimiento_promocional", False))
+            st.session_state.rol_usuario = _row_menor.get("rol", "alumno") or "alumno"
+            st.session_state.universidad_asignada = _row_menor.get("universidad_asignada", "") or ""
+        else:
+            st.session_state.es_menor_edad_actual = False
+            st.session_state.tutor_confirmado_actual = False
+            st.session_state.rol_usuario = "alumno"
+            st.session_state.universidad_asignada = ""
+    except Exception:
+        st.session_state.es_menor_edad_actual = False
+        st.session_state.tutor_confirmado_actual = False
+        st.session_state.rol_usuario = "alumno"
+        st.session_state.universidad_asignada = ""
+
+
+def es_usuario_menor():
+    """True si el usuario en sesión está marcado como menor de edad."""
+    return bool(st.session_state.get("es_menor_edad_actual", False))
+
+
+# =================================================================
+# ROLES Y PANEL DE ADMINISTRADOR / UNIVERSIDADES
+# =================================================================
+# Requiere en Supabase, tabla "usuarios", las columnas adicionales:
+#   rol (text, default 'alumno')                -> 'alumno' | 'admin' | 'universidad'
+#   universidad_asignada (text, nullable)        -> nombre exacto de UNIVERSIDADES_DATA,
+#                                                    solo se usa cuando rol='universidad'
+# Un usuario con rol='universidad' SOLO ve alumnos que (a) la seleccionaron como de su
+# interés y (b) dieron consentimiento explícito para compartir su info con universidades
+# (columna consentimiento_universidades). Un usuario con rol='admin' ve todo.
+
+PANEL_ADMIN_PAGES = [
+    "panel_admin", "panel_chat", "panel_simulador",
+    "panel_carreras", "panel_perfiles", "panel_consultor", "panel_usuarios",
+]
+
+
+def rol_usuario_actual():
+    return st.session_state.get("rol_usuario", "alumno")
+
+
+def es_admin():
+    return rol_usuario_actual() == "admin"
+
+
+def es_universidad():
+    return rol_usuario_actual() == "universidad"
+
+
+def puede_ver_panel():
+    return rol_usuario_actual() in ("admin", "universidad")
 
 
 # --- Archivos binarios en Supabase Storage ---
@@ -1076,6 +1201,12 @@ if "page" not in st.session_state:
                    restaurar_sesion_usuario(_stripe_user)
            if _stripe_sid:
                st.session_state["_stripe_session_id"] = _stripe_sid
+       # Los enlaces de "confirmar tutor" y "recuperar contraseña" que se mandan por
+       # correo también llegan con ?token=XXX en la URL. st.query_params.clear() de
+       # abajo borra ese token antes de que la vista correspondiente lo pueda leer,
+       # así que lo guardamos aquí primero en session_state.
+       elif _page_val in ("confirmar_tutor", "reset_contrasena"):
+           st.session_state["_token_url_pendiente"] = query_params.get("token", "")
    else:
        st.session_state.page = "inicio"
    st.query_params.clear()
@@ -1119,8 +1250,18 @@ if "logged_in" not in st.session_state:
 # Filtro de seguridad: Si no está logueado, prohibir acceso al Hub
 if not st.session_state.logged_in and st.session_state.page in ["locker", "chat", "simulador", "mi_aplicacion", "mensajes", "onboarding"]:
     st.session_state.page = "login"
-# Determinar si el usuario está dentro del Hub
+# Filtro de seguridad: el Panel (admin/universidades) requiere sesión Y el rol correcto.
+# Un alumno normal jamás debe poder entrar tecleando la URL a mano.
+if not st.session_state.logged_in and st.session_state.page in PANEL_ADMIN_PAGES:
+    st.session_state.page = "login"
+elif st.session_state.logged_in and st.session_state.page in PANEL_ADMIN_PAGES and not puede_ver_panel():
+    st.session_state.page = "locker" if st.session_state.get("perfil_completo") else "onboarding"
+elif st.session_state.page == "panel_usuarios" and not es_admin():
+    # Solo el equipo de Uniwebmx puede asignar roles, una universidad no.
+    st.session_state.page = "panel_admin"
+# Determinar si el usuario está dentro del Hub de alumnos o del Panel admin/universidades
 es_hub = st.session_state.page in ["locker", "chat", "simulador", "mi_aplicacion", "mensajes"]
+es_panel = st.session_state.page in PANEL_ADMIN_PAGES
 
 
 # --- INYECCIÓN CSS INTERNA ---
@@ -1153,7 +1294,7 @@ st.markdown(f"""
 
 
    /* Ocultar barra lateral en páginas públicas */
-   {"[data-testid='stSidebar'] {display: none;}" if not es_hub else ""}
+   {"[data-testid='stSidebar'] {display: none;}" if not es_hub and not es_panel else ""}
   
    /* Elminar el texto basura "keyboard_double..." del botón colapsable nativo de Streamlit */
    [data-testid="stSidebarCollapseButton"] button span {{
@@ -1543,7 +1684,7 @@ st.markdown(f"""
 # =================================================================
 # NAV BAR SUPERIOR (SOLO PÚBLICO)
 # =================================================================
-if not es_hub and st.session_state.page != "onboarding":
+if not es_hub and not es_panel and st.session_state.page != "onboarding":
    _logo_nav = (
        f'<img src="data:image/png;base64,{logo_encoded}" style="max-height:28px;display:block;">'
        if logo_encoded else
@@ -1613,7 +1754,7 @@ if es_hub:
        <div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">{_logo_html}</div>
        <p style="{_label_style}">Tu espacio</p>
        <div style="padding:0 10px;">
-           {_sb_item("Locker Digital", "locker", _icon_locker)}
+           {_sb_item("Locker Digital", "locker", _icon_locker) if not es_usuario_menor() else ""}
            {_sb_item("Consultor IA",   "chat",   _icon_chat)}
            {_sb_item("Mi Aplicación",  "mi_aplicacion", _icon_app)}
            {_sb_item("Centro de Mensajes", "mensajes", _icon_msg)}
@@ -1826,6 +1967,83 @@ if es_hub:
                            st.error(f"Error: {e}")
 
 # =================================================================
+# BARRA LATERAL DEL PANEL (admin / universidades) — totalmente separada
+# del hub de alumnos. Nunca muestra Locker, Consultor IA de alumno,
+# Mi Aplicación, Mensajes ni Simulador de alumno.
+# =================================================================
+if es_panel:
+   _pg_panel = st.session_state.page
+   _user_panel = st.session_state.get("user", "")
+   _sesion_t_panel = st.session_state.get("session_token", "")
+   _es_uni_panel = es_universidad()
+   _label_style_panel = "font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#BBBBBB;padding:14px 10px 4px;margin:0;font-family:Montserrat,sans-serif;"
+
+   def _sb_item_panel(label, page_key, icon_path):
+       is_active = _pg_panel == page_key
+       bg = "#EEF1E9" if is_active else "transparent"
+       color = "#4A5D32" if is_active else "#666666"
+       fw = "500" if is_active else "400"
+       return f'''<a href="/?nav={page_key}&t={_sesion_t_panel}" target="_self" style="
+           display:flex;align-items:center;gap:10px;
+           padding:8px 10px;margin:1px 0;border-radius:6px;
+           background:{bg};color:{color};
+           font-family:Montserrat,sans-serif;font-size:0.85rem;font-weight:{fw};
+           text-decoration:none;cursor:pointer;transition:background 0.1s;">
+           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;">
+               {icon_path}
+           </svg>{label}</a>'''
+
+   _icon_resumen    = '<rect x="3" y="12" width="4" height="8"/><rect x="10" y="7" width="4" height="13"/><rect x="17" y="3" width="4" height="17"/>'
+   _icon_chat_panel = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
+   _icon_sim_panel  = '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'
+   _icon_carreras   = '<path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 1.5 3 3 6 3s6-1.5 6-3v-5"/>'
+   _icon_perfiles   = '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>'
+   _icon_consultor  = '<path d="M12 2a7 7 0 0 0-7 7c0 3 2 4 2 7h10c0-3 2-4 2-7a7 7 0 0 0-7-7z"/><path d="M9 21h6"/>'
+   _icon_usuarios   = '<circle cx="9" cy="7" r="4"/><path d="M2 21c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M17 8a3 3 0 1 1 0 6"/><path d="M22 21c0-2.5-1.8-4.5-4.3-5.4"/>'
+
+   with st.sidebar:
+       st.markdown(f"""
+       <div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">
+           <span style="font-size:15px;font-weight:600;color:#1A1A1A;letter-spacing:-0.03em;">uniwebmx</span>
+           <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;
+               color:#4A5D32;margin-top:2px;">{"Panel de la universidad" if _es_uni_panel else "Panel de administrador"}</div>
+       </div>
+       <p style="{_label_style_panel}">General</p>
+       <div style="padding:0 10px;">
+           {_sb_item_panel("Resumen", "panel_admin", _icon_resumen)}
+       </div>
+       <p style="{_label_style_panel}">Uso del producto</p>
+       <div style="padding:0 10px;">
+           {_sb_item_panel("Uso de Hugo (chat)", "panel_chat", _icon_chat_panel)}
+           {_sb_item_panel("Simulador", "panel_simulador", _icon_sim_panel)}
+       </div>
+       <p style="{_label_style_panel}">Insights</p>
+       <div style="padding:0 10px;">
+           {_sb_item_panel("Carreras y universidades", "panel_carreras", _icon_carreras)}
+           {_sb_item_panel("Perfiles por universidad", "panel_perfiles", _icon_perfiles)}
+           {_sb_item_panel("Consultor Hugo", "panel_consultor", _icon_consultor)}
+       </div>
+       {f'<p style="{_label_style_panel}">Administración</p><div style="padding:0 10px;">{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}</div>' if es_admin() else ""}
+       <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
+       """, unsafe_allow_html=True)
+
+       st.markdown(f"""
+       <div style="padding:0 10px;">
+           <div style="padding:8px 10px;font-family:Montserrat,sans-serif;font-size:0.78rem;color:#999;">
+               Sesión: <strong style="color:#444;">{_user_panel}</strong>
+           </div>
+           <a href="/?nav=__logout__" target="_self" style="display:flex;align-items:center;gap:8px;
+               padding:8px 10px;border-radius:6px;color:#C0392B;font-family:Montserrat,sans-serif;
+               font-size:0.85rem;font-weight:500;text-decoration:none;">
+               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                   <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+               </svg>Cerrar sesión</a>
+       </div>
+       """, unsafe_allow_html=True)
+
+# =================================================================
 # TOPBAR DEL HUB
 # =================================================================
 if es_hub:
@@ -1879,7 +2097,9 @@ Para cualquier duda sobre este aviso, puedes contactarnos en: **[correo de priva
 **Sí.** Una parte importante de nuestros usuarios son estudiantes de bachillerato, muchos de ellos menores de 18 años. Por eso:
 
 - Si eres **menor de edad**, el uso de Uniwebmx y el tratamiento de tus datos personales requiere el **consentimiento de tu padre, madre o tutor legal**, particularmente para las finalidades secundarias descritas en la Sección 6 (uso de tus datos para entrenar/mejorar a Hugo y para compartir tu información con universidades).
-- Al registrarte como menor de edad, te pediremos el contacto de un padre/tutor para obtener su consentimiento antes de habilitar cualquier finalidad secundaria. Mientras ese consentimiento no se obtenga, **solo se procesarán tus datos para las finalidades primarias** indispensables para darte el servicio (Sección 5).
+- Al registrarte como menor de edad, te pediremos el contacto de un padre/tutor. Ese contacto recibe un correo con un enlace de confirmación (doble verificación): mientras el padre/tutor no confirme desde ese enlace, **solo se procesarán tus datos para las finalidades primarias** indispensables para darte el servicio (Sección 5); las finalidades secundarias permanecen desactivadas.
+- Al confirmar, el padre/madre/tutor decide, con casillas independientes, si autoriza cada finalidad secundaria (6.1, 6.2, 6.3) por separado.
+- **El Locker Digital (almacenamiento permanente de documentos) no está disponible para cuentas de menores de edad.** Dado que ahí se guardan documentos especialmente sensibles (acta de nacimiento, CURP, identificación oficial, comprobante de domicilio), decidimos no almacenarlos de forma persistente para usuarios menores de edad. Los alumnos menores de edad sí pueden usar con normalidad a Hugo y el Simulador Estadístico.
 - Un padre, madre o tutor puede en cualquier momento solicitar el acceso, corrección o eliminación de los datos de su hijo/a menor de edad, o revocar el consentimiento otorgado, escribiendo a **[correo de privacidad]**.
 
 ---
@@ -1894,8 +2114,8 @@ Dependiendo de cómo uses la plataforma, podemos recabar:
 **Datos académicos y de tu proceso de admisión:**
 - Kárdex/certificado de bachillerato, promedio, ensayo o carta de motivos, currículo, cartas de recomendación, universidades y carreras de tu interés.
 
-**Documentos de identidad (Locker Digital):**
-- Acta de nacimiento, CURP, identificación oficial, fotografía, comprobante de domicilio.
+**Documentos de identidad (Locker Digital — solo cuentas de mayores de edad):**
+- Acta de nacimiento, CURP, identificación oficial, fotografía, comprobante de domicilio. Esta función no está disponible para cuentas registradas como menores de edad (ver Sección 2).
 
 **Datos de pago:**
 - Procesados directamente por nuestro proveedor de pagos (Stripe); **Uniwebmx no almacena los datos completos de tu tarjeta**.
@@ -1991,7 +2211,7 @@ Puedes revocar el consentimiento de las finalidades secundarias (6.1, 6.2, 6.3) 
 
 ## 10. Uso de cookies y tecnologías similares
 
-[Completar según corresponda — si la plataforma usa cookies de sesión de Streamlit, analítica (Google Analytics, etc.), o ninguna por ahora.]
+Por el momento, Uniwebmx únicamente utiliza las cookies técnicas de sesión necesarias para que la plataforma funcione (por ejemplo, para mantener tu sesión iniciada). **Actualmente no usamos herramientas de analítica como Google Analytics ni cookies de publicidad o rastreo de terceros.** Si en el futuro decidimos incorporar herramientas de analítica para entender el uso de la plataforma, actualizaremos esta sección antes de activarlas y, de ser necesario, te lo notificaremos conforme a la Sección 11.
 
 ---
 
@@ -2105,7 +2325,7 @@ Al usar la Plataforma, te comprometes a no:
 
 ## 11. Menores de edad
 
-El uso de la Plataforma por menores de edad está sujeto al consentimiento de su padre, madre o tutor legal, conforme se detalla en el Aviso de Privacidad. Uniwebmx puede solicitar verificación razonable de dicho consentimiento antes de habilitar funciones que impliquen el tratamiento de datos sensibles o su transferencia a terceros.
+El uso de la Plataforma por menores de edad está sujeto al consentimiento de su padre, madre o tutor legal, conforme se detalla en el Aviso de Privacidad. Ese consentimiento se verifica mediante un enlace de confirmación enviado al correo del padre/madre/tutor; mientras no se confirme, las funciones que impliquen el tratamiento de datos sensibles o su transferencia a terceros permanecen desactivadas. Adicionalmente, el Locker Digital (almacenamiento permanente de documentos de identidad) no está disponible para cuentas registradas como menores de edad.
 
 ---
 
@@ -2132,6 +2352,217 @@ Estos Términos se rigen por las leyes de los Estados Unidos Mexicanos. Para cua
 **[Nombre de la empresa]**
 Correo: **[correo de contacto]**
 """
+
+
+# =================================================================
+# DATOS Y ANÁLISIS DEL PANEL (admin / universidades)
+# =================================================================
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _panel_cargar_datos_crudos():
+    """Trae todos los alumnos + sus datos de uso (chat, simulador, perfil).
+    Cacheado 5 min para no golpear Supabase en cada click del panel."""
+    try:
+        res_usuarios = supabase_client.table("usuarios").select(
+            "username, email, plan, edad, es_menor_edad, rol, universidad_asignada, "
+            "consentimiento_universidades, consentimiento_hugo, created_at"
+        ).execute()
+        usuarios_rows = res_usuarios.data or []
+    except Exception:
+        usuarios_rows = []
+    try:
+        res_datos = supabase_client.table("datos_usuario").select("username, datos, updated_at").execute()
+        datos_rows = res_datos.data or []
+    except Exception:
+        datos_rows = []
+
+    datos_por_usuario = {r["username"]: r for r in datos_rows}
+    filas = []
+    for u in usuarios_rows:
+        _reg = datos_por_usuario.get(u["username"], {})
+        d = _reg.get("datos") or {}
+        filas.append({
+            "username": u["username"],
+            "email": u.get("email", "") or "",
+            "plan": u.get("plan", "gratis") or "gratis",
+            "edad": u.get("edad"),
+            "es_menor_edad": bool(u.get("es_menor_edad", False)),
+            "rol": u.get("rol", "alumno") or "alumno",
+            "universidad_asignada": u.get("universidad_asignada") or "",
+            "consentimiento_universidades": bool(u.get("consentimiento_universidades", False)),
+            "consentimiento_hugo": bool(u.get("consentimiento_hugo", False)),
+            "creado": u.get("created_at"),
+            "historial_chat": d.get("historial_chat", []) or [],
+            "contador_consultas": d.get("contador_consultas", 0) or 0,
+            "simulador_usado": bool(d.get("simulador_usado", False)),
+            "resultados_simulador": d.get("resultados_simulador") or {},
+            "unis_seleccionadas": d.get("unis_seleccionadas", []) or [],
+            "perfil_completo": bool(d.get("perfil_completo", False)),
+            "perfil_edad": d.get("perfil_edad"),
+            "perfil_carreras": d.get("perfil_carreras", []) or [],
+            "perfil_universidades_interes": d.get("perfil_universidades_interes", []) or [],
+            "actualizado": _reg.get("updated_at"),
+        })
+    return pd.DataFrame(filas)
+
+
+def _panel_dataframe_alumnos():
+    """DataFrame de alumnos, filtrado según quién está viendo el panel:
+    - admin: ve a todos los alumnos.
+    - universidad: SOLO ve alumnos que la seleccionaron como de interés Y dieron
+      consentimiento explícito para compartir su info con universidades."""
+    df = _panel_cargar_datos_crudos()
+    if df.empty:
+        return df
+    df = df[df["rol"] == "alumno"].copy()
+    if es_universidad():
+        uni = st.session_state.get("universidad_asignada", "")
+        if not uni:
+            return df.iloc[0:0]
+        def _le_interesa(row):
+            return bool(row["consentimiento_universidades"]) and (
+                uni in (row["unis_seleccionadas"] or []) or uni in (row["perfil_universidades_interes"] or [])
+            )
+        df = df[df.apply(_le_interesa, axis=1)]
+    return df
+
+
+def _panel_contar_frecuencias(df, columna):
+    """Cuenta frecuencias de listas (perfil_carreras, unis_seleccionadas, etc.)."""
+    contador = {}
+    for lista in df[columna]:
+        for item in (lista or []):
+            item = (item or "").strip()
+            if item:
+                contador[item] = contador.get(item, 0) + 1
+    return dict(sorted(contador.items(), key=lambda x: x[1], reverse=True))
+
+
+def _panel_universidades_de_interes(df):
+    """Unión de unis_seleccionadas + perfil_universidades_interes por alumno (sin duplicar)."""
+    contador = {}
+    for _, row in df.iterrows():
+        unis = set((row["unis_seleccionadas"] or [])) | set((row["perfil_universidades_interes"] or []))
+        for uni in unis:
+            uni = (uni or "").strip()
+            if uni:
+                contador[uni] = contador.get(uni, 0) + 1
+    return dict(sorted(contador.items(), key=lambda x: x[1], reverse=True))
+
+
+def _panel_alumnos_de_universidad(df, nombre_uni):
+    """Sub-dataframe de alumnos interesados en una universidad específica."""
+    def _interesado(row):
+        return nombre_uni in (row["unis_seleccionadas"] or []) or nombre_uni in (row["perfil_universidades_interes"] or [])
+    return df[df.apply(_interesado, axis=1)]
+
+
+def _panel_generar_perfil_universidad_ia(nombre_uni, sub_df):
+    """Le pide a Hugo (Gemini) que describa, en agregado y de forma anónima, qué tipo
+    de alumnos aplican a esta universidad y por qué — sin exponer nombres ni datos
+    identificables, solo patrones estadísticos."""
+    if sub_df.empty:
+        return "Todavía no hay suficientes alumnos interesados en esta universidad para generar un análisis."
+
+    edades = [e for e in sub_df["perfil_edad"].tolist() if isinstance(e, (int, float))]
+    carreras_contador = _panel_contar_frecuencias(sub_df, "perfil_carreras")
+    top_carreras = ", ".join(f"{c} ({n})" for c, n in list(carreras_contador.items())[:8]) or "no especificadas"
+    n_total = len(sub_df)
+    n_pro = int((sub_df["plan"] == "pro").sum())
+    n_simulador = int(sub_df["simulador_usado"].sum())
+    promedios = []
+    for res in sub_df["resultados_simulador"]:
+        info = (res or {}).get(nombre_uni)
+        if isinstance(info, dict) and info.get("prob_final") is not None:
+            promedios.append(info["prob_final"])
+    prob_promedio = round(sum(promedios) / len(promedios), 1) if promedios else None
+
+    resumen_stats = (
+        f"Universidad: {nombre_uni}\n"
+        f"Alumnos interesados en la plataforma: {n_total}\n"
+        f"Edad promedio: {round(sum(edades)/len(edades),1) if edades else 'sin dato'}\n"
+        f"Carreras de interés más comunes entre ellos: {top_carreras}\n"
+        f"Usuarios plan Pro entre ellos: {n_pro} de {n_total}\n"
+        f"Usaron el simulador de admisión: {n_simulador} de {n_total}\n"
+        f"Probabilidad de admisión estimada promedio (simulador): "
+        f"{prob_promedio if prob_promedio is not None else 'sin dato suficiente'}%"
+    )
+
+    try:
+        model = genai.GenerativeModel(
+            "gemini-2.5-flash",
+            system_instruction=(
+                "Eres Hugo, analizando datos agregados y anónimos de una plataforma de "
+                "orientación universitaria para describirle a un equipo de admisiones (o al equipo "
+                "interno de Uniwebmx) qué tipo de perfil de alumno está aplicando a una universidad "
+                "específica. NUNCA inventes nombres ni datos individuales: trabaja solo con los "
+                "agregados que se te dan. Responde en español, en un párrafo de 4-6 líneas, tono "
+                "profesional y directo, tipo 'insight de negocio': qué perfil predomina, qué "
+                "carreras buscan y por qué crees (con base en los datos) que eligen esta "
+                "universidad. Si los datos son insuficientes para algo, dilo brevemente en vez de "
+                "inventar."
+            ),
+        )
+        respuesta = model.generate_content(resumen_stats)
+        return respuesta.text
+    except Exception as e:
+        return f"No se pudo generar el análisis con Hugo en este momento ({e})."
+
+
+def _panel_responder_consultor(pregunta, df, historial):
+    """Chat de 'Hugo consultor' para el panel: responde preguntas sobre los datos
+    agregados y filtrados que le corresponde ver a quien está en sesión (admin ve todo,
+    universidad solo lo suyo)."""
+    top_carreras = _panel_contar_frecuencias(df, "perfil_carreras")
+    top_unis = _panel_universidades_de_interes(df)
+    total_mensajes = sum(
+        1 for h in df["historial_chat"] for m in (h or []) if m.get("role") == "user"
+    )
+    contexto = (
+        f"Alcance de estos datos: {'TODA la plataforma (vista de administrador)' if es_admin() else 'solo alumnos interesados en ' + rol_universidad_nombre()}\n"
+        f"Total de alumnos en este alcance: {len(df)}\n"
+        f"Perfil completo: {int(df['perfil_completo'].sum())}\n"
+        f"Usaron el simulador: {int(df['simulador_usado'].sum())}\n"
+        f"Plan Pro: {int((df['plan']=='pro').sum())}\n"
+        f"Mensajes totales enviados a Hugo: {total_mensajes}\n"
+        f"Top carreras de interés: {list(top_carreras.items())[:10]}\n"
+        f"Top universidades de interés: {list(top_unis.items())[:10]}\n"
+    )
+    historial_gemini = [
+        {"role": ("user" if m["role"] == "user" else "model"), "parts": [m["content"]]}
+        for m in historial
+    ]
+    try:
+        model = genai.GenerativeModel(
+            "gemini-2.5-flash",
+            system_instruction=(
+                "Eres Hugo, pero ahora en modo 'consultor de datos' para el equipo interno de "
+                "Uniwebmx o para una universidad socia. Te dan estadísticas agregadas y anónimas "
+                "de uso de la plataforma; tu trabajo es ayudar a interpretarlas, encontrar patrones "
+                "y sugerir acciones. Responde en español, de forma concisa y concreta. Si te "
+                "preguntan algo que no puedes saber con estos datos (por ejemplo información "
+                "individual de un alumno específico), dilo claramente en vez de inventar.\n\n"
+                f"[DATOS DISPONIBLES]\n{contexto}"
+            ),
+        )
+        chat = model.start_chat(history=historial_gemini[:-1])
+        respuesta = chat.send_message(pregunta)
+        return respuesta.text
+    except Exception as e:
+        return f"No pude procesar tu pregunta en este momento ({e})."
+
+
+def rol_universidad_nombre():
+    return st.session_state.get("universidad_asignada", "") or "tu universidad"
+
+
+def _panel_header(titulo, subtitulo=""):
+    st.markdown(f"""
+    <div style="padding-top:1.5rem;margin-bottom:1.5rem;">
+        <h1 style="font-size:1.8rem;font-weight:700;color:#1A1A1A;letter-spacing:-0.02em;margin-bottom:0.2rem;">{titulo}</h1>
+        {f'<p style="font-size:0.9rem;color:#888;">{subtitulo}</p>' if subtitulo else ''}
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =================================================================
@@ -2461,25 +2892,25 @@ elif st.session_state.page == "registro":
         reg_tutor_email = ""
         reg_tutor_consiente = False
         reg_acepta_legal = False
+        reg_consiente_hugo = False
+        reg_consiente_unis = False
+        reg_consiente_promo = False
 
         if _es_menor:
             st.markdown(
                 "<div style='background:#FAEEDA;border-radius:8px;padding:14px 16px;margin:0.8rem 0;'>"
                 "<p style='font-size:0.85rem;color:#5F4B1E;line-height:1.6;margin:0;'>"
                 "Como indicaste que eres menor de edad, el uso de Uniwebmx requiere el consentimiento de tu "
-                "padre, madre o tutor legal. Pídele que complete los siguientes datos y acepte en tu representación "
-                "el <a href='/?page=aviso_privacidad' target='_blank' style='color:#4A5D32;font-weight:600;'>Aviso de Privacidad</a> "
-                "y los <a href='/?page=terminos' target='_blank' style='color:#4A5D32;font-weight:600;'>Términos y Condiciones</a>."
+                "padre, madre o tutor legal. Escribe sus datos abajo: en cuanto crees la cuenta, le enviaremos "
+                "un correo para que confirme y decida sobre el uso adicional de tus datos, incluyendo el "
+                "<a href='/?page=aviso_privacidad' target='_blank' style='color:#4A5D32;font-weight:600;'>Aviso de Privacidad</a> "
+                "y los <a href='/?page=terminos' target='_blank' style='color:#4A5D32;font-weight:600;'>Términos y Condiciones</a>. "
+                "Mientras no confirme, algunas funciones seguirán desactivadas."
                 "</p></div>",
                 unsafe_allow_html=True,
             )
             reg_tutor_nombre = st.text_input("Nombre del padre, madre o tutor legal", placeholder="", key="reg_tutor_nombre_input")
             reg_tutor_email  = st.text_input("Correo electrónico del padre, madre o tutor legal", placeholder="", key="reg_tutor_email_input")
-            reg_tutor_consiente = st.checkbox(
-                "Yo, como padre/madre/tutor legal, autorizo el registro y uso de Uniwebmx por parte de este "
-                "alumno menor de edad, y acepto en su representación el Aviso de Privacidad y los Términos y Condiciones.",
-                key="reg_tutor_consiente_input",
-            )
         else:
             st.markdown(
                 "<p style='font-size:0.82rem;color:#666;margin:0.6rem 0 0.3rem;'>Al crear tu cuenta, aceptas nuestro "
@@ -2492,10 +2923,27 @@ elif st.session_state.page == "registro":
                 "He leído y acepto el Aviso de Privacidad y los Términos y Condiciones",
                 key="reg_acepta_legal",
             )
+            st.markdown(
+                "<p style='font-size:0.78rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#999;margin:1.2rem 0 0.4rem;'>Opcional — tú decides</p>",
+                unsafe_allow_html=True,
+            )
+            reg_consiente_hugo = st.checkbox(
+                "Acepto que mis interacciones con Hugo se usen para mejorar y entrenar al asistente de IA de Uniwebmx.",
+                key="reg_consiente_hugo_input",
+            )
+            reg_consiente_unis = st.checkbox(
+                "Acepto que Uniwebmx comparta mi información con las universidades que yo seleccione como de mi interés.",
+                key="reg_consiente_unis_input",
+            )
+            reg_consiente_promo = st.checkbox(
+                "Acepto recibir correos sobre nuevas funciones, becas y contenido educativo de Uniwebmx.",
+                key="reg_consiente_promo_input",
+            )
 
         _reg_clicked = st.button("Crear cuenta", use_container_width=True, key="reg_submit_btn")
         if _reg_clicked:
             import re as _re_email
+            import secrets as _secrets_reg
             _email_val = reg_email.strip()
             _email_ok = bool(_re_email.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", _email_val))
             _pass_ok  = len(reg_pass) >= 8 and bool(_re_email.search(r"[A-Za-z]", reg_pass)) and bool(_re_email.search(r"\d", reg_pass))
@@ -2512,13 +2960,15 @@ elif st.session_state.page == "registro":
                 st.error("Al ser menor de edad, necesitamos el nombre de tu padre, madre o tutor legal.")
             elif _es_menor and not _tutor_email_ok:
                 st.error("El correo del padre, madre o tutor legal no tiene un formato válido.")
-            elif _es_menor and not reg_tutor_consiente:
-                st.error("Tu padre, madre o tutor legal debe marcar la casilla de autorización para poder crear tu cuenta.")
             elif not _es_menor and not reg_acepta_legal:
                 st.error("Debes aceptar el Aviso de Privacidad y los Términos y Condiciones para crear tu cuenta.")
             else:
-                users = load_users()
-                if reg_nombre in users:
+                reg_nombre_limpio = reg_nombre.strip()
+                # Antes se usaba load_users() (traía TODA la tabla a memoria); eso se corta
+                # en tablas grandes por el límite de filas de PostgREST y podía dejar pasar
+                # usernames que sí existían. Ahora preguntamos directo por ese username.
+                _username_existente = supabase_client.table("usuarios").select("username").eq("username", reg_nombre_limpio).execute()
+                if _username_existente.data:
                     st.error("El usuario ya existe, intenta con otro.")
                 else:
                     # Verificar que el correo no esté ya registrado
@@ -2526,26 +2976,44 @@ elif st.session_state.page == "registro":
                     if _email_existente.data:
                         st.error("Ya existe una cuenta con ese correo electrónico.")
                     else:
-                        _fecha_consentimiento = datetime.now(timezone.utc).isoformat() if _es_menor else None
-                        save_user(
-                            reg_nombre, reg_pass, _email_val,
+                        _token_tutor = None
+                        _token_tutor_expiry = None
+                        if _es_menor:
+                            _token_tutor = _secrets_reg.token_urlsafe(32)
+                            _token_tutor_expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+
+                        _creado_ok = save_user(
+                            reg_nombre_limpio, reg_pass, _email_val,
                             edad=int(reg_edad),
                             es_menor_edad=_es_menor,
                             tutor_nombre=reg_tutor_nombre.strip() if _es_menor else "",
                             tutor_email=_tutor_email_val if _es_menor else "",
                             tutor_consentimiento=reg_tutor_consiente if _es_menor else False,
-                            tutor_consentimiento_fecha=_fecha_consentimiento,
+                            tutor_confirm_token=_token_tutor,
+                            tutor_confirm_token_expiry=_token_tutor_expiry,
+                            # Para menores, las finalidades secundarias arrancan en False y solo
+                            # se activan cuando el tutor confirma desde el correo (doble opt-in).
+                            consentimiento_hugo=reg_consiente_hugo if not _es_menor else False,
+                            consentimiento_universidades=reg_consiente_unis if not _es_menor else False,
+                            consentimiento_promocional=reg_consiente_promo if not _es_menor else False,
+                            consentimientos_fecha=datetime.now(timezone.utc).isoformat() if not _es_menor else None,
                         )
-                        enviar_correo_bienvenida_registro(_email_val)
-                        if _es_menor:
-                            enviar_correo_consentimiento_tutor(
-                                _tutor_email_val, reg_tutor_nombre.strip(), reg_nombre, _email_val, _fecha_consentimiento
-                            )
-                        st.success("Cuenta creada exitosamente.")
-                        if _es_menor:
-                            st.info("Le enviamos una constancia de esta autorización al correo de tu padre, madre o tutor. Ya puedes iniciar sesión.")
+                        if not _creado_ok:
+                            # Alguien más se registró con ese username en el instante entre
+                            # nuestra revisión y el insert (carrera). No truena la página.
+                            st.error("Ese usuario se acaba de registrar por alguien más justo ahora. Intenta con otro nombre de usuario.")
                         else:
-                            st.info("Ahora puedes iniciar sesión.")
+                            enviar_correo_bienvenida_registro(_email_val)
+                            if _es_menor:
+                                _confirm_link = f"{BASE_URL}/?page=confirmar_tutor&token={_token_tutor}"
+                                enviar_correo_confirmacion_tutor(
+                                    _tutor_email_val, reg_tutor_nombre.strip(), reg_nombre_limpio, _email_val, _confirm_link
+                                )
+                            st.success("Cuenta creada exitosamente.")
+                            if _es_menor:
+                                st.info("Le enviamos un correo a tu padre, madre o tutor para que confirme y decida sobre el uso adicional de tus datos. Mientras tanto, ya puedes iniciar sesión y usar las funciones básicas.")
+                            else:
+                                st.info("Ahora puedes iniciar sesión.")
         
         st.markdown("""
         <p class='auth-redirect-text'>¿Ya tienes cuenta?</p>
@@ -2590,7 +3058,9 @@ elif st.session_state.page == "login":
                 # se confirmara el pago, lo verificamos aquí también.
                 if verificar_pago_pendiente(_login_username):
                     st.session_state.plan_usuario = "pro"
-                if st.session_state.get("perfil_completo"):
+                if puede_ver_panel():
+                    cambiar_pagina("panel_admin")
+                elif st.session_state.get("perfil_completo"):
                     cambiar_pagina("locker")
                 else:
                     cambiar_pagina("onboarding")
@@ -2703,7 +3173,7 @@ elif st.session_state.page == "olvide_contrasena":
 elif st.session_state.page == "reset_contrasena":
     from datetime import timezone as _tz2
 
-    _token_url = st.query_params.get("token", "")
+    _token_url = st.query_params.get("token", "") or st.session_state.get("_token_url_pendiente", "")
 
     col_img, col_form = st.columns([1.1, 0.9], gap="large")
     with col_img:
@@ -2934,182 +3404,218 @@ elif st.session_state.page == "onboarding":
 elif st.session_state.page == "locker":
    _user = st.session_state.get("user")
 
-   st.markdown("""
-   <div class="hero-section-locker">
-       <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Tu Locker Digital</h1>
-       <p style='font-size: 1.35rem; color: #1A1A1A; max-width: 850px; margin: 0 auto; line-height: 1.6; font-weight: 400; opacity: 0.9;'>
-           Centraliza tus documentos. Súbelos una vez y la app los empaquetará por universidad cuando estés listo.
-       </p>
-   </div>
-   """, unsafe_allow_html=True)
+   if es_usuario_menor():
+       st.markdown("""
+       <div class="hero-section-locker">
+           <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Tu Locker Digital</h1>
+       </div>
+       """, unsafe_allow_html=True)
+       st.markdown(
+           "<div style='max-width:680px;margin:0 auto;background:#FAEEDA;border-radius:12px;padding:28px 32px;'>"
+           "<h3 style='margin-top:0;color:#5F4B1E;font-size:1.15rem;'>El Locker Digital no está disponible para tu cuenta</h3>"
+           "<p style='font-size:0.92rem;color:#5F4B1E;line-height:1.7;margin-bottom:0;'>"
+           "Por ser menor de edad, y dado que el Locker guarda documentos sensibles como tu acta de nacimiento, "
+           "CURP, identificación oficial y comprobante de domicilio, Uniwebmx <strong>no almacena de forma permanente "
+           "esos documentos</strong> en tu cuenta. Puedes seguir usando a Hugo y el Simulador con normalidad — solo el "
+           "almacenamiento persistente de documentos está desactivado para proteger tu información."
+           "</p></div>",
+           unsafe_allow_html=True,
+       )
+   else:
+    st.markdown("""
+    <div class="hero-section-locker">
+        <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Tu Locker Digital</h1>
+        <p style='font-size: 1.35rem; color: #1A1A1A; max-width: 850px; margin: 0 auto; line-height: 1.6; font-weight: 400; opacity: 0.9;'>
+            Centraliza tus documentos. Súbelos una vez y la app los empaquetará por universidad cuando estés listo.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-   # ── helper ────────────────────────────────────────────────────────────────
-   def _doc_slot(key, label, desc, tipos, session_key=None):
-       """Renderiza una tarjeta de documento reutilizable."""
-       sk = session_key or key
-       if sk not in st.session_state:
-           st.session_state[sk] = {"nombre": None, "contenido": ""}
+    # ── helper ────────────────────────────────────────────────────────────────
+    def _doc_slot(key, label, desc, tipos, session_key=None):
+        """Renderiza una tarjeta de documento reutilizable."""
+        sk = session_key or key
+        if sk not in st.session_state:
+            st.session_state[sk] = {"nombre": None, "contenido": ""}
 
-       with st.container(border=True):
-           st.markdown(f"<h4 style='margin-bottom:4px;'>{label}</h4>", unsafe_allow_html=True)
-           st.markdown(f'<p class="locker-text-desc">{desc}</p>', unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(f"<h4 style='margin-bottom:4px;'>{label}</h4>", unsafe_allow_html=True)
+            st.markdown(f'<p class="locker-text-desc">{desc}</p>', unsafe_allow_html=True)
 
-           doc = st.session_state[sk]
-           if doc.get("nombre"):
-               st.success(f"✓ {doc['nombre']}", icon=None)
-               mostrar_visor_documento(_user, key)
-               st.markdown('<div class="quitar-link">', unsafe_allow_html=True)
-               if st.button("✕ Quitar documento", key=f"quitar_{key}"):
-                   st.session_state[sk] = {"nombre": None, "contenido": ""}
-                   eliminar_archivo_original(_user, key)
-                   guardar_datos_usuario(_user)
-                   st.rerun()
-               st.markdown('</div>', unsafe_allow_html=True)
+            doc = st.session_state[sk]
+            if doc.get("nombre"):
+                st.success(f"✓ {doc['nombre']}", icon=None)
+                mostrar_visor_documento(_user, key)
+                st.markdown('<div class="quitar-link">', unsafe_allow_html=True)
+                if st.button("✕ Quitar documento", key=f"quitar_{key}"):
+                    st.session_state[sk] = {"nombre": None, "contenido": ""}
+                    eliminar_archivo_original(_user, key)
+                    guardar_datos_usuario(_user)
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
-           archivo = st.file_uploader(
-               "Reemplazar" if doc.get("nombre") else "",
-               type=tipos,
-               key=f"up_{key}"
-           )
-           if archivo is not None and doc.get("nombre") != archivo.name:
-               # Verificar límite de tamaño para plan gratis
-               _limite_mb = LIMITES[get_plan()]["locker_mb"]
-               if _limite_mb is not None and len(archivo.getvalue()) > _limite_mb * 1024 * 1024:
-                   _banner_upgrade(f"Este archivo supera el límite de {_limite_mb}MB del plan gratis. Mejora a Pro para subir archivos sin límite.")
-               else:
-                   with st.spinner("Guardando..."):
-                       guardar_archivo_original(_user, key, archivo.name, archivo.getvalue())
-                       texto = extraer_texto_archivo(archivo) if archivo.type in ["application/pdf","text/plain"] else ""
-                       st.session_state[sk] = {"nombre": archivo.name, "contenido": texto}
-                       guardar_datos_usuario(_user)
-                   st.toast(f"'{archivo.name}' guardado.")
-                   st.rerun()
+            archivo = st.file_uploader(
+                "Reemplazar" if doc.get("nombre") else "",
+                type=tipos,
+                key=f"up_{key}"
+            )
+            if archivo is not None and doc.get("nombre") != archivo.name:
+                # Verificar límite de tamaño para plan gratis
+                _limite_mb = LIMITES[get_plan()]["locker_mb"]
+                if _limite_mb is not None and len(archivo.getvalue()) > _limite_mb * 1024 * 1024:
+                    _banner_upgrade(f"Este archivo supera el límite de {_limite_mb}MB del plan gratis. Mejora a Pro para subir archivos sin límite.")
+                else:
+                    with st.spinner("Guardando..."):
+                        guardar_archivo_original(_user, key, archivo.name, archivo.getvalue())
+                        texto = extraer_texto_archivo(archivo) if archivo.type in ["application/pdf","text/plain"] else ""
+                        st.session_state[sk] = {"nombre": archivo.name, "contenido": texto}
+                        guardar_datos_usuario(_user)
+                    st.toast(f"'{archivo.name}' guardado.")
+                    st.rerun()
 
-   # ── Sección: Documentos académicos ───────────────────────────────────────
-   st.markdown("""
-   <div style="margin: 2rem 0 1rem;">
-       <p style="font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#AAAAAA;margin-bottom:6px;font-family:Montserrat,sans-serif;">Documentos académicos</p>
-       <p style="font-size:0.9rem;color:#666;margin:0;">Los que tú produces o tu escuela expide. Claves para tu expediente.</p>
-   </div>
-   """, unsafe_allow_html=True)
+    # ── Sección: Documentos académicos ───────────────────────────────────────
+    st.markdown("""
+    <div style="margin: 2rem 0 1rem;">
+        <p style="font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#AAAAAA;margin-bottom:6px;font-family:Montserrat,sans-serif;">Documentos académicos</p>
+        <p style="font-size:0.9rem;color:#666;margin:0;">Los que tú produces o tu escuela expide. Claves para tu expediente.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-   ca1, ca2, ca3 = st.columns(3)
-   with ca1:
-       _doc_slot("kardex", "Kárdex / Certificado", "Tu historial académico oficial. PDF o TXT.", ["pdf","txt"], session_key="kárdex")
-   with ca2:
-       _doc_slot("ensayo", "Ensayo / Carta de motivos", "Tu carta personal o declaración de propósito.", ["pdf","txt"])
-   with ca3:
-       _doc_slot("curriculum", "Currículum académico", "Logros, extracurriculares y actividades relevantes.", ["pdf","txt","docx"])
+    ca1, ca2, ca3 = st.columns(3)
+    with ca1:
+        _doc_slot("kardex", "Kárdex / Certificado", "Tu historial académico oficial. PDF o TXT.", ["pdf","txt"], session_key="kárdex")
+    with ca2:
+        _doc_slot("ensayo", "Ensayo / Carta de motivos", "Tu carta personal o declaración de propósito.", ["pdf","txt"])
+    with ca3:
+        _doc_slot("curriculum", "Currículum académico", "Logros, extracurriculares y actividades relevantes.", ["pdf","txt","docx"])
 
-   ca4, ca5, ca6 = st.columns(3)
-   with ca4:
-       _doc_slot("cartas", "Cartas de recomendación", "Expedidas por profesores, directores o tutores.", ["pdf","docx"])
-   with ca5:
-       _doc_slot("portafolio", "Portafolio / Extracurriculares", "Diplomas, reconocimientos, proyectos, voluntariados.", ["pdf","zip","jpg","png"])
-   with ca6:
-       st.markdown("<div style='height:100%;'></div>", unsafe_allow_html=True)  # espacio vacío
+    ca4, ca5, ca6 = st.columns(3)
+    with ca4:
+        _doc_slot("cartas", "Cartas de recomendación", "Expedidas por profesores, directores o tutores.", ["pdf","docx"])
+    with ca5:
+        _doc_slot("portafolio", "Portafolio / Extracurriculares", "Diplomas, reconocimientos, proyectos, voluntariados.", ["pdf","zip","jpg","png"])
+    with ca6:
+        st.markdown("<div style='height:100%;'></div>", unsafe_allow_html=True)  # espacio vacío
 
-   # ── Sección: Documentos personales ───────────────────────────────────────
-   st.markdown("""
-   <div style="margin: 2.5rem 0 1rem;">
-       <p style="font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#AAAAAA;margin-bottom:6px;font-family:Montserrat,sans-serif;">Documentos personales</p>
-       <p style="font-size:0.9rem;color:#666;margin:0;">Los que el gobierno expide. Súbelos escaneados o en foto.</p>
-   </div>
-   """, unsafe_allow_html=True)
+    # ── Sección: Documentos personales ───────────────────────────────────────
+    st.markdown("""
+    <div style="margin: 2.5rem 0 1rem;">
+        <p style="font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#AAAAAA;margin-bottom:6px;font-family:Montserrat,sans-serif;">Documentos personales</p>
+        <p style="font-size:0.9rem;color:#666;margin:0;">Los que el gobierno expide. Súbelos escaneados o en foto.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-   cp1, cp2, cp3 = st.columns(3)
-   with cp1:
-       _doc_slot("acta", "Acta de nacimiento", "Original escaneada o copia certificada.", ["pdf","jpg","png"])
-   with cp2:
-       _doc_slot("curp", "CURP", "Descárgala en gob.mx si no la tienes.", ["pdf","jpg","png"])
-   with cp3:
-       _doc_slot("identificacion", "Identificación oficial", "INE, pasaporte o credencial de tu prepa.", ["pdf","jpg","png"])
+    cp1, cp2, cp3 = st.columns(3)
+    with cp1:
+        _doc_slot("acta", "Acta de nacimiento", "Original escaneada o copia certificada.", ["pdf","jpg","png"])
+    with cp2:
+        _doc_slot("curp", "CURP", "Descárgala en gob.mx si no la tienes.", ["pdf","jpg","png"])
+    with cp3:
+        _doc_slot("identificacion", "Identificación oficial", "INE, pasaporte o credencial de tu prepa.", ["pdf","jpg","png"])
 
-   cp4, cp5, cp6 = st.columns(3)
-   with cp4:
-       _doc_slot("foto", "Foto credencial", "Fondo blanco, reciente, formato infantil o credencial.", ["jpg","png"])
-   with cp5:
-       _doc_slot("comprobante", "Comprobante de domicilio", "Recibo de luz, agua o teléfono reciente.", ["pdf","jpg","png"])
-   with cp6:
-       st.markdown("<div style='height:100%;'></div>", unsafe_allow_html=True)
+    cp4, cp5, cp6 = st.columns(3)
+    with cp4:
+        _doc_slot("foto", "Foto credencial", "Fondo blanco, reciente, formato infantil o credencial.", ["jpg","png"])
+    with cp5:
+        _doc_slot("comprobante", "Comprobante de domicilio", "Recibo de luz, agua o teléfono reciente.", ["pdf","jpg","png"])
+    with cp6:
+        st.markdown("<div style='height:100%;'></div>", unsafe_allow_html=True)
 
-   st.markdown("<div style='margin-bottom:3rem;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom:3rem;'></div>", unsafe_allow_html=True)
 
 
 # --- VISTA: MI APLICACIÓN (carpetas por universidad) ---
 elif st.session_state.page == "mi_aplicacion":
    _user = st.session_state.get("user")
-   if "unis_seleccionadas" not in st.session_state:
-       st.session_state.unis_seleccionadas = []
 
-   st.markdown("""
-   <div class="hero-section-locker">
-       <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Mi Aplicación</h1>
-       <p style='font-size: 1.35rem; color: #1A1A1A; max-width: 850px; margin: 0 auto; line-height: 1.6; font-weight: 400; opacity: 0.9;'>
-           Elige a qué universidades quieres aplicar. Armamos una carpeta por cada una con los documentos que pide, usando lo que ya subiste a tu Locker Digital.
-       </p>
-   </div>
-   """, unsafe_allow_html=True)
-
-   unis_elegidas = st.multiselect(
-       "¿A qué universidades quieres aplicar?",
-       options=list(UNIVERSIDADES_DATA.keys()),
-       default=st.session_state.unis_seleccionadas,
-       key="multiselect_mi_aplicacion",
-   )
-
-   if unis_elegidas != st.session_state.unis_seleccionadas:
-       st.session_state.unis_seleccionadas = unis_elegidas
-       guardar_datos_usuario(_user)
-       st.rerun()
-
-   st.markdown("<div style='margin-bottom:1.5rem;'></div>", unsafe_allow_html=True)
-
-   if not unis_elegidas:
-       st.info("Selecciona una o más universidades arriba para ver sus carpetas de documentos.")
+   if es_usuario_menor():
+       st.markdown("""
+       <div class="hero-section-locker">
+           <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Mi Aplicación</h1>
+       </div>
+       """, unsafe_allow_html=True)
+       st.markdown(
+           "<div style='max-width:680px;margin:0 auto;background:#FAEEDA;border-radius:12px;padding:28px 32px;'>"
+           "<h3 style='margin-top:0;color:#5F4B1E;font-size:1.15rem;'>Esta sección no está disponible para tu cuenta</h3>"
+           "<p style='font-size:0.92rem;color:#5F4B1E;line-height:1.7;margin-bottom:0;'>"
+           "Las carpetas por universidad se arman con los documentos de tu Locker Digital, que no está disponible "
+           "para cuentas de menores de edad. Puedes seguir usando a Hugo para resolver dudas sobre tu proceso de "
+           "admisión."
+           "</p></div>",
+           unsafe_allow_html=True,
+       )
    else:
-       for nombre_uni in unis_elegidas:
-           datos_uni = UNIVERSIDADES_DATA[nombre_uni]
-           docs_requeridos = datos_uni.get("documentos", [])
-           docs_extra = datos_uni.get("documentos_extra", [])
+    if "unis_seleccionadas" not in st.session_state:
+        st.session_state.unis_seleccionadas = []
 
-           total_items = len(docs_requeridos) + len(docs_extra)
-           completos = sum(
-               1 for d in docs_requeridos
-               if st.session_state.get(("kárdex" if d == "kardex" else d), {}).get("nombre")
-           )
+    st.markdown("""
+    <div class="hero-section-locker">
+        <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Mi Aplicación</h1>
+        <p style='font-size: 1.35rem; color: #1A1A1A; max-width: 850px; margin: 0 auto; line-height: 1.6; font-weight: 400; opacity: 0.9;'>
+            Elige a qué universidades quieres aplicar. Armamos una carpeta por cada una con los documentos que pide, usando lo que ya subiste a tu Locker Digital.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-           with st.expander(f"📁 {nombre_uni}  —  {completos}/{len(docs_requeridos)} documentos listos", expanded=True):
-               st.caption(f"Avance de la carpeta: {completos} de {len(docs_requeridos)} documentos del Locker ya están listos.")
-               st.progress(completos / len(docs_requeridos) if docs_requeridos else 0)
+    unis_elegidas = st.multiselect(
+        "¿A qué universidades quieres aplicar?",
+        options=list(UNIVERSIDADES_DATA.keys()),
+        default=st.session_state.unis_seleccionadas,
+        key="multiselect_mi_aplicacion",
+    )
 
-               for d in docs_requeridos:
-                   sk = "kárdex" if d == "kardex" else d
-                   info_doc = DOCUMENTOS_LOCKER_INFO.get(d, {"label": d})
-                   doc_guardado = st.session_state.get(sk, {})
-                   col_check, col_nombre, col_accion = st.columns([0.4, 3, 1.5])
-                   with col_check:
-                       st.markdown("✅" if doc_guardado.get("nombre") else "⬜")
-                   with col_nombre:
-                       if doc_guardado.get("nombre"):
-                           st.markdown(f"**{info_doc['label']}** — {doc_guardado['nombre']}")
-                       else:
-                           st.markdown(f"**{info_doc['label']}** — *pendiente*")
-                   with col_accion:
-                       if not doc_guardado.get("nombre"):
-                           if st.button("Subir en Locker", key=f"ir_locker_{nombre_uni}_{d}"):
-                               cambiar_pagina("locker")
+    if unis_elegidas != st.session_state.unis_seleccionadas:
+        st.session_state.unis_seleccionadas = unis_elegidas
+        guardar_datos_usuario(_user)
+        st.rerun()
 
-               if docs_extra:
-                   st.markdown("<p style='font-size:0.85rem;color:#888;margin-top:10px;margin-bottom:4px;'>Otros requisitos (gestiónalos directo con la universidad):</p>", unsafe_allow_html=True)
-                   for extra in docs_extra:
-                       st.markdown(f"<p style='font-size:0.9rem;color:#444;margin:2px 0;'>⬜ {extra}</p>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom:1.5rem;'></div>", unsafe_allow_html=True)
 
-               if completos == len(docs_requeridos) and docs_requeridos:
-                   st.success("¡Carpeta completa! Ya tienes todos los documentos del Locker listos para esta universidad.")
+    if not unis_elegidas:
+        st.info("Selecciona una o más universidades arriba para ver sus carpetas de documentos.")
+    else:
+        for nombre_uni in unis_elegidas:
+            datos_uni = UNIVERSIDADES_DATA[nombre_uni]
+            docs_requeridos = datos_uni.get("documentos", [])
+            docs_extra = datos_uni.get("documentos_extra", [])
 
-       st.markdown("<div style='margin-bottom:2rem;'></div>", unsafe_allow_html=True)
-       st.caption("Tip: las carpetas se actualizan solas en cuanto subas o reemplaces un documento en tu Locker Digital.")
+            total_items = len(docs_requeridos) + len(docs_extra)
+            completos = sum(
+                1 for d in docs_requeridos
+                if st.session_state.get(("kárdex" if d == "kardex" else d), {}).get("nombre")
+            )
+
+            with st.expander(f"📁 {nombre_uni}  —  {completos}/{len(docs_requeridos)} documentos listos", expanded=True):
+                st.caption(f"Avance de la carpeta: {completos} de {len(docs_requeridos)} documentos del Locker ya están listos.")
+                st.progress(completos / len(docs_requeridos) if docs_requeridos else 0)
+
+                for d in docs_requeridos:
+                    sk = "kárdex" if d == "kardex" else d
+                    info_doc = DOCUMENTOS_LOCKER_INFO.get(d, {"label": d})
+                    doc_guardado = st.session_state.get(sk, {})
+                    col_check, col_nombre, col_accion = st.columns([0.4, 3, 1.5])
+                    with col_check:
+                        st.markdown("✅" if doc_guardado.get("nombre") else "⬜")
+                    with col_nombre:
+                        if doc_guardado.get("nombre"):
+                            st.markdown(f"**{info_doc['label']}** — {doc_guardado['nombre']}")
+                        else:
+                            st.markdown(f"**{info_doc['label']}** — *pendiente*")
+                    with col_accion:
+                        if not doc_guardado.get("nombre"):
+                            if st.button("Subir en Locker", key=f"ir_locker_{nombre_uni}_{d}"):
+                                cambiar_pagina("locker")
+
+                if docs_extra:
+                    st.markdown("<p style='font-size:0.85rem;color:#888;margin-top:10px;margin-bottom:4px;'>Otros requisitos (gestiónalos directo con la universidad):</p>", unsafe_allow_html=True)
+                    for extra in docs_extra:
+                        st.markdown(f"<p style='font-size:0.9rem;color:#444;margin:2px 0;'>⬜ {extra}</p>", unsafe_allow_html=True)
+
+                if completos == len(docs_requeridos) and docs_requeridos:
+                    st.success("¡Carpeta completa! Ya tienes todos los documentos del Locker listos para esta universidad.")
+
+        st.markdown("<div style='margin-bottom:2rem;'></div>", unsafe_allow_html=True)
+        st.caption("Tip: las carpetas se actualizan solas en cuanto subas o reemplaces un documento en tu Locker Digital.")
 
 
 # --- VISTA: CENTRO DE MENSAJES (conexión IMAP al correo del usuario) ---
@@ -3385,6 +3891,15 @@ elif st.session_state.page == "chat":
                     
                     st.session_state.historial_chat.append({"role": "assistant", "content": texto_hugo})
 
+                    # Finalidad secundaria 6.1: solo se guarda esta conversación en la tabla
+                    # de entrenamiento si el usuario (o su tutor, si es menor de edad) dio
+                    # consentimiento explícito. Para menores, este flag solo se activa cuando
+                    # el tutor confirma vía el correo de doble opt-in.
+                    if st.session_state.get("consentimiento_hugo_actual", False):
+                        guardar_conversacion_entrenamiento(
+                            st.session_state.get("user"), prompt_chat, texto_hugo
+                        )
+
                 except Exception as e:
                     if "429" in str(e):
                         msg_error = "**Hugo está tomando un descanso.** Has alcanzado el límite de velocidad de la API. Intenta en un momento."
@@ -3541,7 +4056,345 @@ elif st.session_state.page == "simulador":
             st.caption("Las probabilidades 'estimadas' usan referencias razonables ante la falta de datos públicos de la universidad; no representan una cifra oficial.")
     else:
         st.info("Captura tu promedio y examen arriba y da clic en \"Calcular mis probabilidades\" para ver tu gráfica personalizada.")
-# --- VISTA: AVISO DE PRIVACIDAD ---
+
+# =================================================================
+# PANEL DE ADMINISTRADOR / UNIVERSIDADES
+# =================================================================
+# Todas estas vistas están protegidas por el guard de acceso definido junto a
+# PANEL_ADMIN_PAGES (arriba): solo entra quien tiene rol 'admin' o 'universidad'.
+
+# --- VISTA: RESUMEN GENERAL ---
+elif st.session_state.page == "panel_admin":
+    _df_panel = _panel_dataframe_alumnos()
+    if es_universidad():
+        _panel_header(f"Resumen — {rol_universidad_nombre()}", "Solo alumnos que te seleccionaron como universidad de interés y dieron su consentimiento.")
+    else:
+        _panel_header("Resumen general", "Qué tanto se está usando Uniwebmx ahora mismo.")
+
+    if _df_panel.empty:
+        st.info("Todavía no hay datos de alumnos en este alcance.")
+    else:
+        _total = len(_df_panel)
+        _perfil_ok = int(_df_panel["perfil_completo"].sum())
+        _pro = int((_df_panel["plan"] == "pro").sum())
+        _simulador = int(_df_panel["simulador_usado"].sum())
+        _mensajes = sum(1 for h in _df_panel["historial_chat"] for m in (h or []) if m.get("role") == "user")
+        _con_chat = sum(1 for h in _df_panel["historial_chat"] if any(m.get("role") == "user" for m in (h or [])))
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Alumnos", _total)
+        c2.metric("Perfil completo", f"{_perfil_ok}/{_total}")
+        c3.metric("Plan Pro", f"{_pro}/{_total}")
+        c4.metric("Usaron el simulador", f"{_simulador}/{_total}")
+
+        c5, c6, c7 = st.columns(3)
+        c5.metric("Mensajes enviados a Hugo", _mensajes)
+        c6.metric("Alumnos que le han hablado a Hugo", f"{_con_chat}/{_total}")
+        c7.metric("Promedio de mensajes por alumno activo", round(_mensajes / _con_chat, 1) if _con_chat else 0)
+
+        st.markdown("<div style='margin-top:1.5rem;'></div>", unsafe_allow_html=True)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("##### Top 5 carreras de interés")
+            _tc = list(_panel_contar_frecuencias(_df_panel, "perfil_carreras").items())[:5]
+            if _tc:
+                st.bar_chart(pd.DataFrame(_tc, columns=["Carrera", "Alumnos"]).set_index("Carrera"))
+            else:
+                st.caption("Aún no hay suficientes datos.")
+        with col_b:
+            st.markdown("##### Top 5 universidades de interés")
+            _tu = list(_panel_universidades_de_interes(_df_panel).items())[:5]
+            if _tu:
+                st.bar_chart(pd.DataFrame(_tu, columns=["Universidad", "Alumnos"]).set_index("Universidad"))
+            else:
+                st.caption("Aún no hay suficientes datos.")
+
+        st.caption("Los datos se actualizan cada 5 minutos. Si acabas de registrar un alumno nuevo, puede tardar en aparecer.")
+
+# --- VISTA: USO DE HUGO (CHAT) ---
+elif st.session_state.page == "panel_chat":
+    _df_panel = _panel_dataframe_alumnos()
+    _panel_header("Uso de Hugo (chat)", "Qué tan útil y qué tanto se está usando el consultor de IA.")
+    if _df_panel.empty:
+        st.info("Todavía no hay datos de alumnos en este alcance.")
+    else:
+        _df_panel = _df_panel.copy()
+        _df_panel["mensajes_usuario"] = _df_panel["historial_chat"].apply(
+            lambda h: sum(1 for m in (h or []) if m.get("role") == "user")
+        )
+        _total = len(_df_panel)
+        _activos = int((_df_panel["mensajes_usuario"] > 0).sum())
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Alumnos que han usado a Hugo", f"{_activos}/{_total}")
+        c2.metric("Mensajes totales", int(_df_panel["mensajes_usuario"].sum()))
+        c3.metric("Consultas registradas hoy (contador diario)", int(_df_panel["contador_consultas"].sum()))
+
+        st.markdown("##### Alumnos más activos con Hugo")
+        _top_activos = _df_panel[_df_panel["mensajes_usuario"] > 0].sort_values("mensajes_usuario", ascending=False)
+        _cols_mostrar = ["username", "plan", "mensajes_usuario"] if es_admin() else ["mensajes_usuario"]
+        if not _top_activos.empty:
+            st.dataframe(_top_activos[_cols_mostrar].head(20), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Todavía nadie le ha escrito a Hugo en este alcance.")
+        st.caption("Nota: el 'contador diario' se reinicia cada día, así que puede ser menor a los mensajes totales acumulados.")
+
+# --- VISTA: USO DEL SIMULADOR ---
+elif st.session_state.page == "panel_simulador":
+    _df_panel = _panel_dataframe_alumnos()
+    _panel_header("Uso del simulador", "Qué tanto se usa y qué tan optimistas o realistas son los resultados.")
+    if _df_panel.empty:
+        st.info("Todavía no hay datos de alumnos en este alcance.")
+    else:
+        _total = len(_df_panel)
+        _usado = int(_df_panel["simulador_usado"].sum())
+        c1, c2 = st.columns(2)
+        c1.metric("Alumnos que usaron el simulador", f"{_usado}/{_total}")
+        c2.metric("% de adopción", f"{round(100*_usado/_total, 1) if _total else 0}%")
+
+        st.markdown("##### Probabilidad promedio estimada por universidad (según el simulador)")
+        _promedios_uni = {}
+        for res in _df_panel["resultados_simulador"]:
+            for uni, info in (res or {}).items():
+                if isinstance(info, dict) and info.get("prob_final") is not None:
+                    _promedios_uni.setdefault(uni, []).append(info["prob_final"])
+        if _promedios_uni:
+            _tabla = pd.DataFrame(
+                [(u, round(sum(v)/len(v), 1), len(v)) for u, v in _promedios_uni.items()],
+                columns=["Universidad", "Probabilidad promedio (%)", "Alumnos"],
+            ).sort_values("Alumnos", ascending=False)
+            st.dataframe(_tabla, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Todavía no hay suficientes resultados del simulador en este alcance.")
+
+# --- VISTA: CARRERAS Y UNIVERSIDADES ---
+elif st.session_state.page == "panel_carreras":
+    _df_panel = _panel_dataframe_alumnos()
+    _panel_header("Carreras y universidades", "Quién aplica a qué, en números.")
+    if _df_panel.empty:
+        st.info("Todavía no hay datos de alumnos en este alcance.")
+    else:
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("##### Top carreras de interés")
+            _tc = _panel_contar_frecuencias(_df_panel, "perfil_carreras")
+            if _tc:
+                st.bar_chart(pd.DataFrame(list(_tc.items()), columns=["Carrera", "Alumnos"]).set_index("Carrera"))
+                st.dataframe(pd.DataFrame(list(_tc.items()), columns=["Carrera", "Alumnos"]), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Aún no hay suficientes datos.")
+        with col_b:
+            st.markdown("##### Top universidades de interés")
+            _tu = _panel_universidades_de_interes(_df_panel)
+            if _tu:
+                st.bar_chart(pd.DataFrame(list(_tu.items()), columns=["Universidad", "Alumnos"]).set_index("Universidad"))
+                st.dataframe(pd.DataFrame(list(_tu.items()), columns=["Universidad", "Alumnos"]), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Aún no hay suficientes datos.")
+
+# --- VISTA: PERFILES POR UNIVERSIDAD (análisis con Hugo) ---
+elif st.session_state.page == "panel_perfiles":
+    _df_panel = _panel_dataframe_alumnos()
+    _panel_header("Perfiles por universidad", "Hugo analiza, en agregado y de forma anónima, quién y por qué aplica a cada universidad.")
+    if _df_panel.empty:
+        st.info("Todavía no hay datos de alumnos en este alcance.")
+    else:
+        _unis_a_mostrar = [rol_universidad_nombre()] if es_universidad() else list(UNIVERSIDADES_DATA.keys())
+        for _uni in _unis_a_mostrar:
+            _sub = _panel_alumnos_de_universidad(_df_panel, _uni)
+            with st.expander(f"{_uni}  ·  {len(_sub)} alumno(s) interesado(s)", expanded=es_universidad()):
+                if _sub.empty:
+                    st.caption("Todavía no hay alumnos interesados en esta universidad en este alcance.")
+                    continue
+                _clave_cache = f"panel_perfil_ia_{_uni}_{len(_sub)}"
+                col_btn, _ = st.columns([1, 3])
+                with col_btn:
+                    _generar = st.button("Generar análisis con Hugo", key=f"btn_{_clave_cache}")
+                if _generar or _clave_cache in st.session_state:
+                    if _generar:
+                        with st.spinner("Hugo está analizando el perfil..."):
+                            st.session_state[_clave_cache] = _panel_generar_perfil_universidad_ia(_uni, _sub)
+                    st.markdown(f"""<div style="background:#F5F5F3;border-radius:10px;padding:14px 18px;
+                        font-size:0.9rem;color:#333;line-height:1.6;margin-top:0.5rem;">
+                        <strong style="color:#4A5D32;">Hugo dice:</strong> {st.session_state.get(_clave_cache, "")}
+                        </div>""", unsafe_allow_html=True)
+                else:
+                    st.caption("Da clic para que Hugo te resuma el perfil típico de quienes aplican aquí.")
+
+# --- VISTA: CONSULTOR HUGO (chat sobre los datos agregados) ---
+elif st.session_state.page == "panel_consultor":
+    _df_panel = _panel_dataframe_alumnos()
+    _panel_header("Consultor Hugo", "Pregúntale a Hugo sobre el uso y los perfiles de tus alumnos.")
+
+    if "panel_historial_consultor" not in st.session_state:
+        st.session_state.panel_historial_consultor = [
+            {"role": "assistant", "content": "Hola, soy Hugo en modo consultor. Puedo ayudarte a interpretar el uso de la plataforma, qué carreras y universidades son más populares, o qué tan bien está funcionando el producto. ¿Qué quieres saber?"}
+        ]
+
+    for _msg in st.session_state.panel_historial_consultor:
+        with st.chat_message(_msg["role"]):
+            st.write(_msg["content"])
+
+    _pregunta_panel = st.chat_input("Pregúntale algo a Hugo sobre tus datos...")
+    if _pregunta_panel:
+        st.session_state.panel_historial_consultor.append({"role": "user", "content": _pregunta_panel})
+        with st.chat_message("user"):
+            st.write(_pregunta_panel)
+        with st.chat_message("assistant"):
+            with st.spinner("Pensando..."):
+                _respuesta_panel = _panel_responder_consultor(_pregunta_panel, _df_panel, st.session_state.panel_historial_consultor)
+                st.write(_respuesta_panel)
+        st.session_state.panel_historial_consultor.append({"role": "assistant", "content": _respuesta_panel})
+
+# --- VISTA: USUARIOS Y ROLES (solo admin) ---
+elif st.session_state.page == "panel_usuarios":
+    _panel_header("Usuarios y roles", "Dale acceso al Panel a tu equipo o a una universidad, sin tocar Supabase directamente.")
+
+    st.markdown("##### Cuentas con acceso al Panel")
+    try:
+        _res_roles = supabase_client.table("usuarios").select(
+            "username, email, rol, universidad_asignada"
+        ).neq("rol", "alumno").execute()
+        _df_roles = pd.DataFrame(_res_roles.data or [])
+    except Exception as e:
+        _df_roles = pd.DataFrame()
+        st.error(f"No se pudo cargar la lista: {e}")
+    if not _df_roles.empty:
+        st.dataframe(_df_roles, use_container_width=True, hide_index=True)
+    else:
+        st.caption("Todavía nadie más tiene rol admin o universidad.")
+
+    st.markdown("<div style='margin-top:1.8rem;'></div>", unsafe_allow_html=True)
+    st.markdown("##### Cambiar el rol de una cuenta")
+    _buscar_user = st.text_input("Usuario o correo exacto", key="panel_usuarios_buscar", placeholder="ej. jpkishi o jp@correo.com")
+
+    if _buscar_user.strip():
+        _term = _buscar_user.strip()
+        try:
+            _res_buscar = supabase_client.table("usuarios").select(
+                "username, email, rol, universidad_asignada"
+            ).or_(f"username.eq.{_term},email.eq.{_term}").execute()
+        except Exception as e:
+            _res_buscar = None
+            st.error(f"No se pudo buscar: {e}")
+
+        if _res_buscar is not None and not _res_buscar.data:
+            st.warning("No encontré ninguna cuenta con ese usuario o correo (debe ser exacto).")
+        elif _res_buscar is not None:
+            _fila = _res_buscar.data[0]
+            _opciones_rol = ["alumno", "admin", "universidad"]
+            _opciones_uni = [""] + list(UNIVERSIDADES_DATA.keys())
+            _rol_actual = _fila.get("rol", "alumno") or "alumno"
+            _uni_actual = _fila.get("universidad_asignada") or ""
+
+            st.markdown(f"**Usuario:** {_fila['username']}  ·  **Correo:** {_fila.get('email', '') or 'sin correo'}  ·  **Rol actual:** `{_rol_actual}`" + (f" ({_uni_actual})" if _uni_actual else ""))
+
+            with st.form(f"form_rol_{_fila['username']}"):
+                _nuevo_rol = st.selectbox("Nuevo rol", _opciones_rol, index=_opciones_rol.index(_rol_actual) if _rol_actual in _opciones_rol else 0)
+                _nueva_uni = st.selectbox(
+                    "Universidad asignada (solo si el rol es 'universidad')",
+                    _opciones_uni,
+                    index=_opciones_uni.index(_uni_actual) if _uni_actual in _opciones_uni else 0,
+                )
+                _guardar_rol = st.form_submit_button("Guardar cambios", use_container_width=True)
+
+            if _guardar_rol:
+                if _nuevo_rol == "universidad" and not _nueva_uni:
+                    st.error("Selecciona a qué universidad corresponde esta cuenta.")
+                elif _fila["username"] == st.session_state.get("user") and _nuevo_rol != "admin":
+                    st.error("No puedes quitarte el rol de admin a ti mismo desde aquí (para que no te quedes fuera del Panel por accidente). Pídele a otro admin que lo haga.")
+                else:
+                    try:
+                        supabase_client.table("usuarios").update({
+                            "rol": _nuevo_rol,
+                            "universidad_asignada": _nueva_uni if _nuevo_rol == "universidad" else None,
+                        }).eq("username", _fila["username"]).execute()
+                        _panel_cargar_datos_crudos.clear()
+                        st.success(
+                            f"Listo: {_fila['username']} ahora tiene rol '{_nuevo_rol}'"
+                            + (f" asignado a {_nueva_uni}." if _nuevo_rol == "universidad" else ".")
+                        )
+                    except Exception as e:
+                        st.error(f"No se pudo actualizar: {e}")
+    else:
+        st.caption("Escribe el usuario o correo exacto de la cuenta a la que le quieres cambiar el rol.")
+
+# --- VISTA: CONFIRMACIÓN DEL TUTOR (doble opt-in para cuentas de menores de edad) ---
+elif st.session_state.page == "confirmar_tutor":
+    _token_tutor_url = st.query_params.get("token", "") or st.session_state.get("_token_url_pendiente", "")
+
+    st.markdown("<div style='max-width:640px;margin:0 auto;padding-top:3rem;'>", unsafe_allow_html=True)
+    st.markdown("<h1 style='font-size:2.2rem;font-weight:700;color:#1A1A1A;margin-bottom:0.4rem;'>Confirmación de tutor</h1>", unsafe_allow_html=True)
+
+    if not _token_tutor_url:
+        st.error("Enlace inválido. Revisa que copiaste el enlace completo del correo.")
+    else:
+        _res_tutor = supabase_client.table("usuarios").select(
+            "username, email, tutor_nombre, tutor_email, tutor_confirmado, tutor_confirm_token_expiry"
+        ).eq("tutor_confirm_token", _token_tutor_url).execute()
+
+        if not _res_tutor.data:
+            st.error("Este enlace no es válido o ya fue utilizado. Si crees que es un error, escríbenos.")
+        else:
+            _fila_tutor = _res_tutor.data[0]
+            _expiry_tutor = _fila_tutor.get("tutor_confirm_token_expiry", "")
+            _expiry_tutor_dt = datetime.fromisoformat(_expiry_tutor) if _expiry_tutor else None
+            _ahora_tutor = datetime.now(timezone.utc)
+
+            if _fila_tutor.get("tutor_confirmado"):
+                st.success("Esta cuenta ya fue confirmada anteriormente. No necesitas hacer nada más.")
+            elif _expiry_tutor_dt and _ahora_tutor > _expiry_tutor_dt:
+                st.error("Este enlace expiró. Escríbenos para que te enviemos uno nuevo.")
+            else:
+                _alumno_username = _fila_tutor["username"]
+                _alumno_email = _fila_tutor.get("email", "")
+                _tutor_nombre_conf = _fila_tutor.get("tutor_nombre", "") or "tutor/a"
+
+                st.markdown(
+                    f"<p style='font-size:0.95rem;color:#444;line-height:1.7;margin-bottom:1.5rem;'>"
+                    f"Hola {_tutor_nombre_conf}, estás confirmando la cuenta de <strong>{_alumno_username}</strong> "
+                    f"({_alumno_email}). Antes de continuar, puedes revisar el "
+                    f"<a href='/?page=aviso_privacidad' target='_blank' style='color:#4A5D32;font-weight:600;'>Aviso de Privacidad</a> "
+                    f"y los <a href='/?page=terminos' target='_blank' style='color:#4A5D32;font-weight:600;'>Términos y Condiciones</a>.</p>",
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(
+                    "<p style='font-size:0.85rem;color:#666;line-height:1.6;margin-bottom:0.8rem;'>"
+                    "Estas finalidades son opcionales e independientes entre sí. Puedes revocarlas cuando quieras "
+                    "escribiéndonos.</p>",
+                    unsafe_allow_html=True,
+                )
+
+                conf_hugo = st.checkbox(
+                    "Acepto que las interacciones de mi hijo/a o representado/a con Hugo se usen para mejorar y "
+                    "entrenar al asistente de IA de Uniwebmx.",
+                    key="conf_tutor_hugo",
+                )
+                conf_unis = st.checkbox(
+                    "Acepto que Uniwebmx comparta su información con las universidades que él/ella seleccione como "
+                    "de su interés.",
+                    key="conf_tutor_unis",
+                )
+                conf_promo = st.checkbox(
+                    "Acepto que reciba correos sobre nuevas funciones, becas y contenido educativo de Uniwebmx.",
+                    key="conf_tutor_promo",
+                )
+
+                if st.button("Confirmar autorización", use_container_width=True, key="conf_tutor_btn"):
+                    supabase_client.table("usuarios").update({
+                        "tutor_confirmado": True,
+                        "consentimiento_hugo": conf_hugo,
+                        "consentimiento_universidades": conf_unis,
+                        "consentimiento_promocional": conf_promo,
+                        "consentimientos_fecha": datetime.now(timezone.utc).isoformat(),
+                        "tutor_confirm_token": None,
+                        "tutor_confirm_token_expiry": None,
+                    }).eq("username", _alumno_username).execute()
+                    st.success("¡Listo! Tu confirmación quedó registrada. Gracias por acompañar a tu hijo/a en este proceso.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 elif st.session_state.page == "aviso_privacidad":
     st.markdown("""
     <div style="max-width:820px;margin:0 auto;padding-top:2rem;">
@@ -3570,7 +4423,7 @@ elif st.session_state.page == "terminos":
 # =================================================================
 # PIE DE PÁGINA (SOLO PÚBLICO)
 # =================================================================
-if not es_hub:
+if not es_hub and not es_panel:
    st.markdown('<div style="margin-top: 5rem;"></div>', unsafe_allow_html=True)
    col_foot1, col_foot2, col_foot3 = st.columns([3, 3, 2])
    with col_foot1:
