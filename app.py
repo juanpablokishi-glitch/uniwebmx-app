@@ -11,7 +11,6 @@ import email
 from email.header import decode_header
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
-import stripe
 import resend
 
 # --- CONFIGURACIÓN DE LA API DE GEMINI ---
@@ -23,9 +22,6 @@ def get_supabase() -> Client:
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase_client = get_supabase()
-
-# --- CLIENTE STRIPE ---
-stripe.api_key = st.secrets["STRIPE_SECRET_KEY"]
 
 # --- CLIENTE RESEND ---
 resend.api_key = st.secrets["RESEND_API_KEY"]
@@ -85,44 +81,6 @@ def _notificar_error_admin(contexto: str, error: Exception, extra: str = ""):
         )
     except Exception as _e_interno:
         print(f"[ALERTA falló al mandarse] {contexto}: {error} | error interno: {_e_interno}")
-
-
-def enviar_correo_bienvenida_pro(correo_usuario: str):
-    """Correo de confirmación de pago Pro."""
-    _enviar_correo(
-        to=correo_usuario,
-        subject="Tu cuenta Pro en Uniwebmx esta activa",
-        html=f"""
-        <div style="font-family:Montserrat,Arial,sans-serif;max-width:560px;margin:0 auto;
-            background:#ffffff;border:1px solid #EAEAEA;border-radius:16px;overflow:hidden;">
-        <div style="text-align:center;padding:28px 32px 20px;border-bottom:1px solid #EAEAEA;margin-bottom:28px;">
-            <img src="https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/logo.png" alt="Uniwebmx" style="height:36px;display:inline-block;">
-        </div>
-            <div style="padding:0 32px 36px;">
-            <h1 style="font-size:1.5rem;font-weight:700;color:#1A1A1A;margin-bottom:0.75rem;">
-                Bienvenido a Uniwebmx Pro
-            </h1>
-            <p style="font-size:0.95rem;color:#444;line-height:1.7;margin-bottom:1.5rem;">
-                Hola <strong>{correo_usuario}</strong>, tu pago fue confirmado. Tu cuenta
-                ya tiene acceso completo a todo lo que Pro incluye:
-            </p>
-            <table style="width:100%;border-collapse:collapse;margin-bottom:1.8rem;">
-                <tr><td style="padding:8px 0;border-bottom:1px solid #F0F0F0;font-size:0.9rem;color:#444;">Locker Digital sin limite de almacenamiento</td></tr>
-                <tr><td style="padding:8px 0;border-bottom:1px solid #F0F0F0;font-size:0.9rem;color:#444;">20 mensajes diarios con Hugo</td></tr>
-                <tr><td style="padding:8px 0;font-size:0.9rem;color:#444;">Simulador estadistico ilimitado</td></tr>
-            </table>
-            <a href="{BASE_URL}" style="display:inline-block;background:#4A5D32;color:#fff;
-                font-size:0.9rem;font-weight:600;padding:13px 32px;border-radius:8px;
-                text-decoration:none;letter-spacing:0.01em;">
-                Ir a mi cuenta
-            </a>
-            <p style="font-size:0.78rem;color:#999;margin-top:2rem;line-height:1.6;">
-                Si tienes alguna duda, responde este correo.<br>— El equipo de Uniwebmx
-            </p>
-            </div>
-        </div>
-        """,
-    )
 
 
 def enviar_correo_bienvenida_registro(correo_usuario: str):
@@ -229,128 +187,34 @@ def guardar_conversacion_entrenamiento(username, mensaje_usuario, respuesta_hugo
         print(f"[hugo_entrenamiento ERROR] No se pudo guardar la conversación de {username}: {e}")
 
 # URL base de la app. En local usa localhost; en producción, define BASE_URL en tus secrets
-# (ej. BASE_URL = "https://tuapp.streamlit.app") para que Stripe regrese al lugar correcto.
+# (ej. BASE_URL = "https://tuapp.streamlit.app")
 BASE_URL = st.secrets.get("BASE_URL", "http://localhost:8501")
 
 # Duración del token de sesión (no del username) que viaja en la URL para los nav links.
 SESSION_TOKEN_DIAS = 30
 
-def crear_sesion_stripe(price_id, username, session_token):
-    """Crea una Checkout Session de Stripe y devuelve la URL."""
-    session = stripe.checkout.Session.create(
-        payment_method_types=["card"],
-        mode="subscription",
-        line_items=[{"price": price_id, "quantity": 1}],
-        success_url=f"{BASE_URL}/?page=pago_exitoso&t={session_token}&session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{BASE_URL}/?page=planes",
-        metadata={"username": username},
-        subscription_data={"metadata": {"username": username}},
-    )
-    # Guardamos el session_id como "pendiente": si el usuario cierra la
-    # pestaña antes de volver por success_url, verificar_pago_pendiente()
-    # lo revisará en su siguiente login (ver definición más abajo).
-    try:
-        supabase_client.table("usuarios").update(
-            {"pending_stripe_session_id": session.id}
-        ).eq("username", username).execute()
-    except Exception:
-        pass
-    return session.url
+# El entorno donde corre la app no siempre tiene fuentes de emoji a color instaladas,
+# así que cualquier emoji que Gemini meta en sus respuestas se ve como un cuadrado
+# naranja/rojo roto en vez del emoji real. Los quitamos de raíz de todo lo que Hugo
+# genera antes de mostrarlo.
+import re as _re_emoji
+_EMOJI_PATTERN = _re_emoji.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U00002B00-\U00002BFF"
+    "\U0001F900-\U0001F9FF"
+    "\U0000FE00-\U0000FE0F"
+    "\U0000200D"
+    "]+",
+    flags=_re_emoji.UNICODE,
+)
 
-def verificar_y_activar_pago(session_id, username_esperado):
-    """
-    Verifica directamente con Stripe (sin depender de un webhook) que la Checkout
-    Session realmente se pagó, y si es así, activa el plan 'pro' en Supabase.
-    Devuelve True si quedó activado, False si no se pudo verificar el pago.
-    """
-    if not session_id:
-        return False
-    try:
-        session = stripe.checkout.Session.retrieve(session_id)
-    except Exception:
-        return False
-
-    pagado = getattr(session, "payment_status", None) == "paid" or getattr(session, "status", None) == "complete"
-    _meta = getattr(session, "metadata", None) or {}
-    username_sesion = _meta.get("username") if isinstance(_meta, dict) else getattr(_meta, "username", None)
-
-    if pagado and username_sesion and username_sesion == username_esperado:
-        subscription_id = getattr(session, "subscription", None)
-        update_data = {"plan": "pro"}
-        if subscription_id:
-            update_data["stripe_subscription_id"] = subscription_id
-        supabase_client.table("usuarios").update(update_data).eq("username", username_esperado).execute()
-        _log_evento(username_esperado, "pago_pro")
-        return True
-    return False
-
-def verificar_pago_pendiente(username):
-    """
-    Red de seguridad para el caso en que el usuario pagó en Stripe pero
-    cerró la pestaña (o perdió conexión) antes de que se completara el
-    redirect a 'pago_exitoso', dejando su cuenta en 'gratis' a pesar de
-    haber pagado. La revisamos en cada login: si hay un session_id
-    pendiente guardado y el plan sigue en 'gratis', lo verificamos contra
-    Stripe igual que en verificar_y_activar_pago(). Devuelve True si el
-    plan quedó activado en esta llamada.
-    Requiere en Supabase, tabla "usuarios": columna "pending_stripe_session_id" (text, nullable).
-    """
-    if not username:
-        return False
-    try:
-        res = supabase_client.table("usuarios").select(
-            "pending_stripe_session_id, plan"
-        ).eq("username", username).execute()
-    except Exception:
-        return False
-    if not res.data:
-        return False
-
-    pending_id = res.data[0].get("pending_stripe_session_id")
-    plan_actual = res.data[0].get("plan")
-
-    if not pending_id or plan_actual == "pro":
-        if pending_id:
-            # Ya no hace falta seguir cargando este campo
-            try:
-                supabase_client.table("usuarios").update(
-                    {"pending_stripe_session_id": None}
-                ).eq("username", username).execute()
-            except Exception:
-                pass
-        return False
-
-    activado = verificar_y_activar_pago(pending_id, username)
-    try:
-        supabase_client.table("usuarios").update(
-            {"pending_stripe_session_id": None}
-        ).eq("username", username).execute()
-    except Exception:
-        pass
-    if activado and "_correo_pro_enviado" not in st.session_state:
-        try:
-            _res_email = supabase_client.table("usuarios").select("email").eq("username", username).execute()
-            _email_pro = (_res_email.data[0].get("email") or "") if _res_email.data else ""
-            if _email_pro:
-                enviar_correo_bienvenida_pro(_email_pro)
-            st.session_state["_correo_pro_enviado"] = True
-        except Exception:
-            pass
-    return activado
-
-# NOTA: la recepción de webhooks de Stripe (checkout.session.completed,
-# customer.subscription.updated, customer.subscription.deleted) ya NO se
-# maneja aquí. Streamlit no expone rutas HTTP para recibir webhooks, así
-# que esta función nunca llegaba a ejecutarse en producción.
-#
-# Ahora vive como una Supabase Edge Function real:
-#   supabase/functions/stripe-webhook/index.ts
-#
-# Esa función es la que mantiene sincronizado el campo "plan" cuando un
-# pago falla o cuando termina una suscripción cancelada (cancel_at_period_end).
-# verificar_y_activar_pago() y verificar_pago_pendiente() siguen aquí abajo
-# como red de seguridad para activar el plan al instante en el redirect de
-# pago_exitoso, sin depender de que el webhook ya haya llegado.
+def _quitar_emojis(texto):
+    if not texto:
+        return texto
+    return _EMOJI_PATTERN.sub("", texto).strip()
 
 def extraer_texto_archivo(archivo):
     """
@@ -693,28 +557,10 @@ def invalidar_sesion_token(username):
         pass
 
 
-def obtener_plan_usuario(username):
-    """Devuelve 'gratis' o 'pro' según la columna plan en Supabase."""
-    try:
-        res = supabase_client.table("usuarios").select("plan").eq("username", username).execute()
-        if res.data:
-            return res.data[0].get("plan", "gratis")
-    except Exception:
-        pass
-    return "gratis"
-
-# Límites por plan
-LIMITES = {
-    "gratis": {"hugo_diario": 3,  "simulador_total": 1,  "locker_mb": 50},
-    "pro":    {"hugo_diario": 20, "simulador_total": None, "locker_mb": None},
-}
-
-def get_plan():
-    """Devuelve el plan activo del usuario en sesión."""
-    return st.session_state.get("plan_usuario", "gratis")
-
-def _banner_upgrade(mensaje):
-    st.warning(f"⭐ {mensaje}  →  ve a **Planes** en el menú para mejorar tu cuenta.")
+# Uniwebmx es gratuito para el usuario (el modelo de negocio es cobrar a las
+# universidades por leads). Estos son los límites únicos para todas las cuentas,
+# equivalentes a lo que antes era el plan "pro":
+LIMITE_HUGO_DIARIO = 20
 
 
 # =================================================================
@@ -763,6 +609,7 @@ def guardar_datos_usuario(username):
         "perfil_edad": st.session_state.get("perfil_edad", None),
         "perfil_carreras": st.session_state.get("perfil_carreras", []),
         "perfil_universidades_interes": st.session_state.get("perfil_universidades_interes", []),
+        "perfil_preparatoria": st.session_state.get("perfil_preparatoria", ""),
         "simulador_usado": st.session_state.get("simulador_usado", False),
     }
     try:
@@ -820,9 +667,8 @@ def restaurar_sesion_usuario(username):
     st.session_state.perfil_edad = datos.get("perfil_edad", None)
     st.session_state.perfil_carreras = datos.get("perfil_carreras", [])
     st.session_state.perfil_universidades_interes = datos.get("perfil_universidades_interes", [])
+    st.session_state.perfil_preparatoria = datos.get("perfil_preparatoria", "")
     st.session_state.simulador_usado = datos.get("simulador_usado", False)
-    # Plan del usuario
-    st.session_state.plan_usuario = obtener_plan_usuario(username)
     # Estatus de menor de edad y consentimiento del tutor (se leen directo de "usuarios",
     # no de "datos_usuario", porque son datos de cuenta, no de progreso).
     try:
@@ -872,7 +718,7 @@ def es_usuario_menor():
 
 PANEL_ADMIN_PAGES = [
     "panel_admin", "panel_chat", "panel_simulador",
-    "panel_carreras", "panel_perfiles", "panel_consultor", "panel_usuarios",
+    "panel_carreras", "panel_perfiles", "panel_carreras_perfiles", "panel_consultor", "panel_usuarios",
 ]
 
 
@@ -1220,14 +1066,10 @@ if "nav" in st.query_params:
        st.session_state.pop("user", None)
        st.session_state.pop("session_token", None)
        st.session_state.page = "inicio"
-   # Estos flujos (cancelar suscripción, darse de baja de promocionales,
-   # eliminar cuenta) antes revisaban st.query_params más abajo en el archivo,
-   # pero para entonces ya se había llamado st.query_params.clear() aquí arriba
-   # y el valor nunca llegaba. Los guardamos en session_state en su lugar.
-   elif _nav_target == "__cancelar_sub__":
-       st.session_state["_confirmar_cancelacion"] = True
-   elif _nav_target == "__ejecutar_cancelacion__":
-       st.session_state["_ejecutar_cancelacion_pendiente"] = True
+   # Estos flujos (darse de baja de promocionales, eliminar cuenta) antes
+   # revisaban st.query_params más abajo en el archivo, pero para entonces
+   # ya se había llamado st.query_params.clear() aquí arriba y el valor
+   # nunca llegaba. Los guardamos en session_state en su lugar.
    elif _nav_target == "__baja_promocional__":
        st.session_state["_ejecutar_baja_promocional_pendiente"] = True
    elif _nav_target == "__eliminar_cuenta__":
@@ -1235,7 +1077,6 @@ if "nav" in st.query_params:
    elif _nav_target == "__ejecutar_eliminacion__":
        st.session_state["_ejecutar_eliminacion_pendiente"] = True
    elif _nav_target == "__descartar_accion_cuenta__":
-       st.session_state["_mostrar_confirmar_cancelacion"] = False
        st.session_state["_mostrar_confirmar_eliminacion"] = False
        st.session_state.page = "locker"
    elif _nav_token:
@@ -1258,25 +1099,11 @@ if "page" not in st.session_state:
    if "page" in query_params:
        _page_val = query_params["page"]
        st.session_state.page = _page_val
-       # Redirect de Stripe tras pago: preservar token y session_id en session_state
-       # antes de limpiar la URL, porque Stripe no usa el formato ?nav=
-       if _page_val == "pago_exitoso":
-           _stripe_token = query_params.get("t", "")
-           _stripe_sid   = query_params.get("session_id", "")
-           if _stripe_token:
-               _stripe_user = validar_sesion_token(_stripe_token)
-               if _stripe_user:
-                   st.session_state.logged_in = True
-                   st.session_state.user = _stripe_user
-                   st.session_state.session_token = _stripe_token
-                   restaurar_sesion_usuario(_stripe_user)
-           if _stripe_sid:
-               st.session_state["_stripe_session_id"] = _stripe_sid
        # Los enlaces de "confirmar tutor" y "recuperar contraseña" que se mandan por
        # correo también llegan con ?token=XXX en la URL. st.query_params.clear() de
        # abajo borra ese token antes de que la vista correspondiente lo pueda leer,
        # así que lo guardamos aquí primero en session_state.
-       elif _page_val in ("confirmar_tutor", "reset_contrasena"):
+       if _page_val in ("confirmar_tutor", "reset_contrasena"):
            st.session_state["_token_url_pendiente"] = query_params.get("token", "")
    else:
        st.session_state.page = "inicio"
@@ -1297,10 +1124,15 @@ def get_base64_image(image_path):
 
 
 logo_encoded = get_base64_image("logo.png")
-logo_pro_encoded = get_base64_image("logo_pro.png")
 fondo_inicio_encoded = get_base64_image("fondo_hero.png")
 fondo_locker_encoded = get_base64_image("fondo_locker.png")
 fondo_auth_encoded = get_base64_image("fondo_auth.png")
+# Fotos del carrusel de la landing (sección "Herramientas"). Sube estos 3
+# archivos a la raíz del proyecto (junto a fondo_hero.png, logo.png, etc.)
+# con estos nombres exactos:
+carrusel_locker_encoded = get_base64_image("fondo_carrusel_locker.png")
+carrusel_consultor_encoded = get_base64_image("fondo_carrusel_consultor.png")
+carrusel_simulador_encoded = get_base64_image("fondo_carrusel_simulador.png")
 
 
 if fondo_inicio_encoded:
@@ -1492,7 +1324,59 @@ st.markdown(f"""
        border: 1px solid #EAEAEA;
        height: 100%;
    }}
-  
+
+   /* CARRUSEL CONTINUO DE HERRAMIENTAS (landing) */
+   .uw-carrusel-viewport {{
+       overflow: hidden;
+       background-color: #FAFAF8;
+       border-radius: 10px;
+       padding: 2rem 0;
+       -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+       mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+   }}
+   .uw-carrusel-track {{
+       display: flex;
+       gap: 18px;
+       width: max-content;
+       animation: uw-scroll 42s linear infinite;
+   }}
+   .uw-carrusel-track:hover {{
+       animation-play-state: paused;
+   }}
+   @keyframes uw-scroll {{
+       from {{ transform: translateX(0); }}
+       to {{ transform: translateX(-50%); }}
+   }}
+   @media (prefers-reduced-motion: reduce) {{
+       .uw-carrusel-track {{ animation: none !important; }}
+   }}
+   .uw-slide {{
+       flex-shrink: 0;
+       width: 320px;
+       height: 220px;
+       border-radius: 10px;
+       overflow: hidden;
+       position: relative;
+       background-size: cover;
+       background-position: center;
+   }}
+   .uw-slide-overlay {{
+       position: absolute;
+       inset: 0;
+       background: linear-gradient(0deg, rgba(20,24,14,0.75) 0%, rgba(20,24,14,0.15) 55%, rgba(20,24,14,0) 75%);
+   }}
+   .uw-slide-text {{
+       position: absolute;
+       left: 0; right: 0; bottom: 0;
+       padding: 18px 20px;
+   }}
+   .uw-somos-icon {{
+       width: 34px; height: 34px; border-radius: 8px;
+       background: #EEF1E9;
+       display: flex; align-items: center; justify-content: center;
+       margin-bottom: 12px;
+   }}
+
    /* LOCKER DESIGN */
    .locker-box-clean {{
        background-color: #FFFFFF !important;
@@ -1701,31 +1585,53 @@ st.markdown(f"""
        border-radius: 8px;
    }}
   
-   /* --- CHAT IDENTICO A GEMINI --- */
+   /* --- CHAT DE HUGO: contenedor tipo tarjeta con marco (no de lado a lado) --- */
    .gemini-chat-container {{
-       max-width: 800px;
-       margin: 0 auto;
-       padding-top: 1rem;
-       padding-bottom: 6rem;
+       max-width: 760px;
+       margin: 0 auto 1.25rem;
+       padding: 1.5rem 1.75rem;
+       border: 1px solid #EAEAEA;
+       border-radius: 16px;
+       background: #FFFFFF;
+       box-shadow: 0 2px 10px rgba(0,0,0,0.04);
    }}
    .gemini-row {{
-       margin-bottom: 2.5rem;
-       line-height: 1.7;
+       display: flex;
+       margin-bottom: 1.1rem;
+   }}
+   .gemini-row.gemini-row-user {{
+       justify-content: flex-end;
+   }}
+   .gemini-row.gemini-row-hugo {{
+       justify-content: flex-start;
+   }}
+   .gemini-bubble {{
+       max-width: 80%;
+   }}
+   .gemini-bubble-user {{
+       background: #EEF1E9;
+       border-radius: 16px 16px 4px 16px;
+       padding: 8px 14px;
+   }}
+   .gemini-bubble-hugo {{
+       max-width: 100%;
    }}
    .gemini-user-label {{
-       font-weight: 700;
-       font-size: 1rem;
-       color: #1A1A1A;
-       margin-bottom: 6px;
+       font-weight: 600;
+       font-size: 0.72rem;
+       color: #666666;
+       margin-bottom: 3px;
+       text-align: right;
    }}
    .gemini-hugo-label {{
        font-weight: 700;
-       font-size: 1rem;
+       font-size: 0.78rem;
        color: #4A5D32;
-       margin-bottom: 6px;
+       margin-bottom: 3px;
    }}
    .gemini-text {{
-       font-size: 1.05rem;
+       font-size: 0.88rem;
+       line-height: 1.45;
        color: #202124;
        white-space: pre-line;
    }}
@@ -1768,7 +1674,6 @@ if not es_hub and not es_panel and st.session_state.page != "onboarding":
            <a href="/?page=ranking" target="_self" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;">Ranking</a>
            <a href="/?page=blog" target="_self" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;">Blog</a>
            <a href="#" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;opacity:0.5;pointer-events:none;">Comunidad</a>
-           <a href="/?page=planes" target="_self" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;">Planes</a>
        </div>
        <div style="display:flex;align-items:center;gap:8px;">
            <a href="/?page=login" target="_self" style="text-decoration:none;font-family:Montserrat,sans-serif;font-size:0.85rem;font-weight:500;color:#1A1A1A;padding:7px 16px;border:0.5px solid #DCDCDC;border-radius:6px;white-space:nowrap;">Iniciar sesión</a>
@@ -1787,8 +1692,7 @@ if es_hub:
    _pg   = st.session_state.page
    _user = st.session_state.get("user", "")
    _sesion_t = st.session_state.get("session_token", "")
-   _es_pro = st.session_state.get("plan_usuario", "gratis") == "pro"
-   _logo_sb = logo_pro_encoded if (_es_pro and logo_pro_encoded) else logo_encoded
+   _logo_sb = logo_encoded
    _logo_html = (
        f'<img src="data:image/png;base64,{_logo_sb}" style="width:100%;max-width:180px;display:block;">'
        if _logo_sb else
@@ -1816,7 +1720,6 @@ if es_hub:
    _icon_sim    = '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'
    _icon_app    = '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>'
    _icon_msg    = '<path d="M4 4h16v12H7l-3 3z"/><path d="M7 9h10M7 12h6"/>'
-   _icon_planes = '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>'
 
    _label_style = "font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#BBBBBB;padding:14px 10px 4px;margin:0;font-family:Montserrat,sans-serif;"
 
@@ -1835,30 +1738,10 @@ if es_hub:
            {_sb_item("Simulador", "simulador", _icon_sim)}
        </div>
        <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
-       <p style="{_label_style}">Cuenta</p>
-       <div style="padding:0 10px;">
-           {_sb_item("Planes", "planes", _icon_planes)}
-       </div>
-       <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
        """, unsafe_allow_html=True)
 
        # --- Perfil fijo al fondo de la sidebar (menú emergente hacia arriba) ---
-       _plan_actual = st.session_state.get("plan_usuario", "gratis")
        _initials_sb = (_user[:2].upper()) if _user else "U"
-       _badge_color = "#4A5D32" if _plan_actual == "pro" else "#AAAAAA"
-       _badge_label = "PRO" if _plan_actual == "pro" else "GRATIS"
-       _cancelar_url = "/?nav=__cancelar_sub__" if _plan_actual == "pro" else ""
-       _cancel_item = f"""
-           <div style="border-top:0.5px solid #EAEAEA;margin:4px 0;padding-top:4px;">
-             <a href="/?nav=__cancelar_sub__" target="_self" style="display:flex;align-items:center;gap:8px;
-                 padding:7px 10px;border-radius:6px;color:#C0392B;font-family:Montserrat,sans-serif;
-                 font-size:0.82rem;font-weight:500;text-decoration:none;">
-               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                 <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-               </svg>Cancelar suscripción
-             </a>
-           </div>""" if _plan_actual == "pro" else ""
 
        # --- Item: darse de baja de correos promocionales ---
        _consiente_promo_actual = st.session_state.get("consentimiento_promocional_actual", False)
@@ -1962,8 +1845,6 @@ if es_hub:
                <div class="profile-menu-header">
                  <div style="font-size:0.82rem;font-weight:600;color:#1A1A1A;
                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_user}</div>
-                 <span style="font-size:0.62rem;font-weight:700;background:{_badge_color};
-                     color:#fff;padding:2px 9px;border-radius:20px;letter-spacing:0.06em;">{_badge_label}</span>
                </div>
                <a href="/?nav=__logout__" target="_self" style="display:flex;align-items:center;gap:9px;
                    padding:8px 14px;color:#555;font-family:Montserrat,sans-serif;
@@ -1974,7 +1855,6 @@ if es_hub:
                    <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
                  </svg>Cerrar sesión
                </a>
-               {_cancel_item}
                <div style="border-top:0.5px solid #EAEAEA;margin:4px 0;padding-top:4px;">
                  {_baja_promo_item}
                  {_eliminar_cuenta_item}
@@ -1990,7 +1870,6 @@ if es_hub:
                <div style="flex:1;overflow:hidden;">
                  <div style="font-size:0.8rem;font-weight:600;color:#1A1A1A;
                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_user}</div>
-                 <div style="font-size:0.65rem;color:#999;margin-top:1px;">{_badge_label}</div>
                </div>
                <svg class="profile-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none"
                     stroke="#999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1999,75 +1878,6 @@ if es_hub:
              </label>
            </div>
            """, unsafe_allow_html=True)
-
-           # Manejo de cancelación de suscripción (el flag ya se guardó arriba,
-           # en el interceptor de nav, antes de que se limpiaran los query_params)
-           if st.session_state.pop("_confirmar_cancelacion", False):
-               st.session_state["_mostrar_confirmar_cancelacion"] = True
-
-           if st.session_state.get("_mostrar_confirmar_cancelacion"):
-               with st.sidebar:
-                   st.markdown("""
-                   <div style="margin:0 4px;padding:12px 14px;background:#FFF5F5;border:1px solid #FECACA;
-                       border-radius:10px;font-family:Montserrat,sans-serif;">
-                     <div style="font-size:0.82rem;font-weight:600;color:#C0392B;margin-bottom:6px;">
-                       ¿Cancelar suscripción?
-                     </div>
-                     <div style="font-size:0.78rem;color:#666;line-height:1.5;">
-                       Seguirás teniendo Pro hasta que termine el período que ya pagaste.
-                     </div>
-                   </div>
-                   """, unsafe_allow_html=True)
-                   st.markdown("""
-                   <style>
-                   div[data-testid="stSidebarContent"] .cancelar-btns a {{
-                       display:block;text-align:center;font-family:Montserrat,sans-serif;
-                       font-size:0.82rem;font-weight:600;border-radius:8px;
-                       padding:9px 0;text-decoration:none;margin-bottom:6px;
-                   }}
-                   </style>
-                   <div class="cancelar-btns" style="margin:8px 4px 0;">
-                   """, unsafe_allow_html=True)
-                   col_si, col_no = st.columns(2)
-                   with col_si:
-                       st.markdown("""<a href="/?nav=__ejecutar_cancelacion__" target="_self"
-                           style="display:block;text-align:center;font-family:Montserrat,sans-serif;
-                           font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;
-                           text-decoration:none;background:#C0392B;color:#fff;">
-                           Sí, cancelar</a>""", unsafe_allow_html=True)
-                   with col_no:
-                       st.markdown("""<a href="/?nav=__descartar_accion_cuenta__" target="_self"
-                           style="display:block;text-align:center;font-family:Montserrat,sans-serif;
-                           font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;
-                           text-decoration:none;background:#F5F5F3;color:#1A1A1A;border:1px solid #E0E0E0;">
-                           Mantener</a>""", unsafe_allow_html=True)
-                   st.markdown("</div>", unsafe_allow_html=True)
-
-           if st.session_state.pop("_ejecutar_cancelacion_pendiente", False):
-               if "_cancelacion_ejecutada" not in st.session_state:
-                   try:
-                       res = supabase_client.table("usuarios").select("stripe_subscription_id").eq("username", _user).execute()
-                       sub_id = res.data[0].get("stripe_subscription_id") if res.data else None
-                       if sub_id:
-                           stripe.Subscription.modify(sub_id, cancel_at_period_end=True)
-                           st.session_state["_cancelacion_ejecutada"] = True
-                           st.session_state["_mostrar_confirmar_cancelacion"] = False
-                           with st.sidebar:
-                               st.markdown("""<div style="margin:0 4px;padding:10px 14px;background:#F0FFF4;
-                                   border:1px solid #C8D4B8;border-radius:10px;font-family:Montserrat,sans-serif;
-                                   font-size:0.8rem;color:#4A5D32;font-weight:500;">
-                                   ✓ Suscripción cancelada correctamente.</div>""", unsafe_allow_html=True)
-                       else:
-                           with st.sidebar:
-                               st.markdown("""<div style="margin:0 4px;padding:10px 14px;background:#FFF5F5;
-                                   border:1px solid #FECACA;border-radius:10px;font-family:Montserrat,sans-serif;
-                                   font-size:0.8rem;color:#C0392B;">
-                                   No encontramos tu suscripción. Escríbenos a hola@uniwebmx.com</div>""",
-                                   unsafe_allow_html=True)
-                   except Exception as e:
-                       with st.sidebar:
-                           st.error(f"Error: {e}")
-                       _notificar_error_admin("cancelar suscripción", e, extra=f"username={_user}")
 
            # --- Darse de baja de correos promocionales (acción directa, sin confirmación) ---
            if st.session_state.pop("_ejecutar_baja_promocional_pendiente", False):
@@ -2098,8 +1908,7 @@ if es_hub:
                      </div>
                      <div style="font-size:0.78rem;color:#666;line-height:1.5;">
                        Esto borra tu cuenta, tu historial con Hugo, tus resultados del simulador y todo lo
-                       demás que tengamos guardado de ti. No se puede deshacer. Si tienes Pro activo, tu
-                       suscripción también se cancela de inmediato.
+                       demás que tengamos guardado de ti. No se puede deshacer.
                      </div>
                    </div>
                    """, unsafe_allow_html=True)
@@ -2130,19 +1939,7 @@ if es_hub:
 
            if st.session_state.pop("_ejecutar_eliminacion_pendiente", False):
                try:
-                   # 1. Si tiene suscripción activa, cancelarla YA (no al final del periodo,
-                   #    porque la cuenta está a punto de dejar de existir).
-                   try:
-                       res_sub = supabase_client.table("usuarios").select("stripe_subscription_id").eq("username", _user).execute()
-                       _sub_id_borrar = res_sub.data[0].get("stripe_subscription_id") if res_sub.data else None
-                       if _sub_id_borrar:
-                           stripe.Subscription.delete(_sub_id_borrar)
-                   except Exception as _e_stripe_del:
-                       # No bloquear el borrado de la cuenta por esto, pero sí avisarte
-                       # para que canceles esa suscripción a mano si hace falta.
-                       _notificar_error_admin("cancelar suscripción al eliminar cuenta", _e_stripe_del, extra=f"username={_user}")
-
-                   # 2. Borrar todos sus datos.
+                   # 1. Borrar todos sus datos.
                    supabase_client.table("datos_usuario").delete().eq("username", _user).execute()
                    try:
                        supabase_client.table("eventos_uso").delete().eq("username", _user).execute()
@@ -2150,7 +1947,7 @@ if es_hub:
                        pass  # si la tabla no existe todavía, no pasa nada
                    supabase_client.table("usuarios").delete().eq("username", _user).execute()
 
-                   # 3. Cerrar la sesión de verdad y mandarlo a una pantalla de despedida.
+                   # 2. Cerrar la sesión de verdad y mandarlo a una pantalla de despedida.
                    invalidar_sesion_token(_user)
                    st.session_state.clear()
                    st.session_state.page = "cuenta_eliminada"
@@ -2199,30 +1996,45 @@ if es_panel:
    _icon_usuarios   = '<circle cx="9" cy="7" r="4"/><path d="M2 21c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M17 8a3 3 0 1 1 0 6"/><path d="M22 21c0-2.5-1.8-4.5-4.3-5.4"/>'
 
    with st.sidebar:
-       st.markdown(f"""
-       <div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">
-           <span style="font-size:15px;font-weight:600;color:#1A1A1A;letter-spacing:-0.03em;">uniwebmx</span>
-           <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;
-               color:#4A5D32;margin-top:2px;">{"Panel de la universidad" if _es_uni_panel else "Panel de administrador"}</div>
-       </div>
-       <p style="{_label_style_panel}">General</p>
-       <div style="padding:0 10px;">
-           {_sb_item_panel("Resumen", "panel_admin", _icon_resumen)}
-       </div>
-       <p style="{_label_style_panel}">Uso del producto</p>
-       <div style="padding:0 10px;">
-           {_sb_item_panel("Uso de Hugo (chat)", "panel_chat", _icon_chat_panel)}
-           {_sb_item_panel("Simulador", "panel_simulador", _icon_sim_panel)}
-       </div>
-       <p style="{_label_style_panel}">Insights</p>
-       <div style="padding:0 10px;">
-           {_sb_item_panel("Carreras y universidades", "panel_carreras", _icon_carreras)}
-           {_sb_item_panel("Perfiles por universidad", "panel_perfiles", _icon_perfiles)}
-           {_sb_item_panel("Consultor Hugo", "panel_consultor", _icon_consultor)}
-       </div>
-       {f'<p style="{_label_style_panel}">Administración</p><div style="padding:0 10px;">{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}</div>' if es_admin() else ""}
-       <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
-       """, unsafe_allow_html=True)
+       if _es_uni_panel:
+           st.markdown(f"""
+           <div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">
+               <span style="font-size:15px;font-weight:600;color:#1A1A1A;letter-spacing:-0.03em;">uniwebmx</span>
+               <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;
+                   color:#4A5D32;margin-top:2px;">Panel de la universidad</div>
+           </div>
+           <div style="padding:12px 10px 0;">
+               {_sb_item_panel("Resumen", "panel_admin", _icon_resumen)}
+               {_sb_item_panel("Carreras y perfiles", "panel_carreras_perfiles", _icon_carreras)}
+               {_sb_item_panel("Hugo", "panel_consultor", _icon_consultor)}
+           </div>
+           <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
+           """, unsafe_allow_html=True)
+       else:
+           st.markdown(f"""
+           <div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">
+               <span style="font-size:15px;font-weight:600;color:#1A1A1A;letter-spacing:-0.03em;">uniwebmx</span>
+               <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;
+                   color:#4A5D32;margin-top:2px;">Panel de administrador</div>
+           </div>
+           <p style="{_label_style_panel}">General</p>
+           <div style="padding:0 10px;">
+               {_sb_item_panel("Resumen", "panel_admin", _icon_resumen)}
+           </div>
+           <p style="{_label_style_panel}">Uso del producto</p>
+           <div style="padding:0 10px;">
+               {_sb_item_panel("Uso de Hugo (chat)", "panel_chat", _icon_chat_panel)}
+               {_sb_item_panel("Simulador", "panel_simulador", _icon_sim_panel)}
+           </div>
+           <p style="{_label_style_panel}">Insights</p>
+           <div style="padding:0 10px;">
+               {_sb_item_panel("Carreras y universidades", "panel_carreras", _icon_carreras)}
+               {_sb_item_panel("Perfiles por universidad", "panel_perfiles", _icon_perfiles)}
+               {_sb_item_panel("Consultor Hugo", "panel_consultor", _icon_consultor)}
+           </div>
+           {f'<p style="{_label_style_panel}">Administración</p><div style="padding:0 10px;">{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}</div>' if es_admin() else ""}
+           <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
+           """, unsafe_allow_html=True)
 
        st.markdown(f"""
        <div style="padding:0 10px;">
@@ -2282,9 +2094,9 @@ AVISO_PRIVACIDAD_MD = """
 
 ## 1. Identidad y domicilio del responsable
 
-**[Razón social / nombre comercial de Uniwebmx]**, con domicilio en **[domicilio fiscal o de operación]**, es responsable del tratamiento de tus datos personales conforme a lo establecido en la Ley Federal de Protección de Datos Personales en Posesión de los Particulares (LFPDPPP) y su Reglamento.
+**Juan Pablo Kishi Gómez**, operando bajo el nombre comercial **Uniwebmx**, con domicilio en **Zapopan, Jalisco, México**, es responsable del tratamiento de tus datos personales conforme a lo establecido en la Ley Federal de Protección de Datos Personales en Posesión de los Particulares (LFPDPPP) y su Reglamento.
 
-Para cualquier duda sobre este aviso, puedes contactarnos en: **[correo de privacidad, ej. privacidad@uniwebmx.com]**.
+Para cualquier duda sobre este aviso, puedes contactarnos en: **info@uniwebmx.com**.
 
 ---
 
@@ -2296,7 +2108,7 @@ Para cualquier duda sobre este aviso, puedes contactarnos en: **[correo de priva
 - Al registrarte como menor de edad, te pediremos el contacto de un padre/tutor. Ese contacto recibe un correo con un enlace de confirmación (doble verificación): mientras el padre/tutor no confirme desde ese enlace, **solo se procesarán tus datos para las finalidades primarias** indispensables para darte el servicio (Sección 5); las finalidades secundarias permanecen desactivadas.
 - Al confirmar, el padre/madre/tutor decide, con casillas independientes, si autoriza cada finalidad secundaria (6.1, 6.2, 6.3) por separado.
 - **El Locker Digital (almacenamiento permanente de documentos) no está disponible para cuentas de menores de edad.** Dado que ahí se guardan documentos especialmente sensibles (acta de nacimiento, CURP, identificación oficial, comprobante de domicilio), decidimos no almacenarlos de forma persistente para usuarios menores de edad. Los alumnos menores de edad sí pueden usar con normalidad a Hugo y el Simulador Estadístico.
-- Un padre, madre o tutor puede en cualquier momento solicitar el acceso, corrección o eliminación de los datos de su hijo/a menor de edad, o revocar el consentimiento otorgado, escribiendo a **[correo de privacidad]**.
+- Un padre, madre o tutor puede en cualquier momento solicitar el acceso, corrección o eliminación de los datos de su hijo/a menor de edad, o revocar el consentimiento otorgado, escribiendo a **info@uniwebmx.com**.
 
 ---
 
@@ -2313,9 +2125,6 @@ Dependiendo de cómo uses la plataforma, podemos recabar:
 **Documentos de identidad (Locker Digital — solo cuentas de mayores de edad):**
 - Acta de nacimiento, CURP, identificación oficial, fotografía, comprobante de domicilio. Esta función no está disponible para cuentas registradas como menores de edad (ver Sección 2).
 
-**Datos de pago:**
-- Procesados directamente por nuestro proveedor de pagos (Stripe); **Uniwebmx no almacena los datos completos de tu tarjeta**.
-
 **Datos derivados del uso de la plataforma:**
 - Conversaciones con Hugo (nuestro asesor con inteligencia artificial), resultados del simulador de probabilidades, historial de mensajes.
 
@@ -2328,7 +2137,6 @@ Dependiendo de cómo uses la plataforma, podemos recabar:
 
 - Directamente de ti, cuando te registras, llenas tu perfil, subes documentos o conversas con Hugo.
 - De forma automática, a través de tu interacción con la plataforma (por ejemplo, los resultados que genera el simulador con base en lo que capturas).
-- A través de Stripe, cuando confirmas un pago (recibimos confirmación del pago, no los datos completos de tu tarjeta).
 
 ---
 
@@ -2340,8 +2148,7 @@ Sin estas finalidades, no podemos ofrecerte Uniwebmx. **No están sujetas a cons
 - Almacenar y mostrarte tus propios documentos (Locker Digital).
 - Generar tus resultados del Simulador Estadístico.
 - Procesar tus conversaciones con Hugo **dentro de tu propia sesión**, para darte retroalimentación personalizada.
-- Procesar tus pagos y gestionar tu suscripción (a través de Stripe).
-- Enviarte correos operativos: confirmación de registro, confirmación de pago, recuperación de contraseña.
+- Enviarte correos operativos: confirmación de registro, recuperación de contraseña.
 - Cumplir con obligaciones legales y atender requerimientos de autoridad.
 
 ---
@@ -2371,7 +2178,6 @@ Compartimos datos únicamente en estos casos:
 
 | Tercero | Qué datos | Para qué |
 |---|---|---|
-| **Stripe** | Datos de pago | Procesar tu suscripción |
 | **Supabase** | Toda tu información almacenada | Es nuestro proveedor de base de datos e infraestructura (almacenamiento técnico, no usan tus datos con fines propios) |
 | **Google (Gemini API)** | Tus mensajes a Hugo y el contexto que envías (kárdex, ensayo, perfil) | Generar las respuestas de Hugo |
 | **Resend** | Tu correo electrónico | Enviarte correos transaccionales |
@@ -2385,7 +2191,7 @@ No vendemos tus datos personales a nadie, bajo ninguna circunstancia.
 
 Tienes derecho a **Acceder, Rectificar, Cancelar u Oponerte** (derechos ARCO) al tratamiento de tus datos personales, así como a **revocar el consentimiento** que hayas otorgado para las finalidades secundarias en cualquier momento.
 
-Para ejercer estos derechos, envía tu solicitud a **[correo de privacidad]** incluyendo:
+Para ejercer estos derechos, envía tu solicitud a **info@uniwebmx.com** incluyendo:
 1. Tu nombre completo y el correo asociado a tu cuenta.
 2. Una descripción clara de tu solicitud.
 3. Si actúas en representación de un menor de edad, documento que acredite tu calidad de padre/madre/tutor.
@@ -2401,7 +2207,6 @@ Puedes revocar el consentimiento de las finalidades secundarias (6.1, 6.2, 6.3) 
 - Tus contraseñas se almacenan con hash (bcrypt), nunca en texto plano.
 - Implementamos bloqueo temporal de cuenta tras intentos fallidos de inicio de sesión repetidos.
 - Las sesiones se manejan con tokens aleatorios no adivinables, con expiración.
-- Los pagos se procesan a través de Stripe, certificado PCI-DSS; Uniwebmx no almacena datos completos de tarjetas.
 
 ---
 
@@ -2420,12 +2225,12 @@ Cualquier modificación a este Aviso de Privacidad será publicada en esta misma
 ## 12. Contacto
 
 **[Nombre de la empresa]**
-Correo: **[correo de privacidad]**
+Correo: **info@uniwebmx.com**
 [Domicilio, si aplica]
 """
 
 TERMINOS_MD = """
-> ⚠️ Borrador de trabajo, no asesoría legal. Requiere revisión de un abogado antes de publicarse, especialmente por el manejo de menores de edad, pagos recurrentes y el uso de inteligencia artificial. Completa los campos entre `[corchetes]`.
+> ⚠️ Borrador de trabajo, no asesoría legal. Requiere revisión de un abogado antes de publicarse, especialmente por el manejo de menores de edad y el uso de inteligencia artificial. Completa los campos entre `[corchetes]`.
 
 ---
 
@@ -2468,13 +2273,11 @@ Esto es importante y lo dejamos explícito para que no haya malentendidos:
 
 ---
 
-## 5. Planes, pagos y suscripciones
+## 5. Uso gratuito de la Plataforma
 
-- Uniwebmx ofrece un plan gratuito con funciones limitadas y un plan Pro de pago, con las funciones descritas en la Plataforma al momento de la contratación.
-- Los pagos se procesan a través de **Stripe**. Al suscribirte, autorizas el cobro recurrente correspondiente a tu plan hasta que canceles.
-- **Cancelación:** puedes cancelar tu suscripción en cualquier momento desde tu cuenta; la cancelación aplica a partir del siguiente periodo de cobro, sin reembolso del periodo ya pagado, salvo que la ley aplicable indique lo contrario.
-- **Cambios de precio:** cualquier cambio en el costo de los planes será notificado con anticipación razonable.
-- [Definir política de reembolsos, si la hay.]
+- Uniwebmx es gratuito para los alumnos: no existen planes de pago ni suscripciones.
+- Uniwebmx genera ingresos a través de acuerdos con universidades, a las que puede compartir información de alumnos que hayan dado su consentimiento expreso conforme a la Sección 6.2 del Aviso de Privacidad (Sección 7 de estos Términos). No se te cobra nada por usar la Plataforma ni por esta funcionalidad.
+- Nos reservamos el derecho de introducir en el futuro funciones adicionales o modelos de negocio distintos; de hacerlo, actualizaremos estos Términos con anticipación razonable conforme a la Sección 13.
 
 ---
 
@@ -2494,7 +2297,7 @@ Uniwebmx **no comparte tu información con universidades a menos que tú (o tu p
 
 ## 8. Propiedad intelectual
 
-- El contenido, diseño, marca y software de Uniwebmx son propiedad de **[razón social]** o de sus licenciantes.
+- El contenido, diseño, marca y software de Uniwebmx son propiedad de **Juan Pablo Kishi Gómez** o de sus licenciantes.
 - Los documentos que subas (kárdex, ensayo, identificaciones, etc.) siguen siendo de tu propiedad; nos das una licencia limitada para almacenarlos y procesarlos únicamente con el fin de prestarte el servicio, conforme al Aviso de Privacidad.
 
 ---
@@ -2539,7 +2342,7 @@ Podemos actualizar estos Términos. Te notificaremos los cambios relevantes y, e
 
 ## 14. Ley aplicable y jurisdicción
 
-Estos Términos se rigen por las leyes de los Estados Unidos Mexicanos. Para cualquier controversia, las partes se someten a los tribunales competentes de **[ciudad/estado]**, renunciando a cualquier otro fuero que pudiera corresponderles.
+Estos Términos se rigen por las leyes de los Estados Unidos Mexicanos. Para cualquier controversia, las partes se someten a los tribunales competentes de **Zapopan, Jalisco**, renunciando a cualquier otro fuero que pudiera corresponderles.
 
 ---
 
@@ -2597,6 +2400,7 @@ def _panel_cargar_datos_crudos():
             "perfil_edad": d.get("perfil_edad"),
             "perfil_carreras": d.get("perfil_carreras", []) or [],
             "perfil_universidades_interes": d.get("perfil_universidades_interes", []) or [],
+            "perfil_preparatoria": d.get("perfil_preparatoria") or "",
             "actualizado": _reg.get("updated_at"),
         })
     return pd.DataFrame(filas)
@@ -2634,6 +2438,16 @@ def _panel_contar_frecuencias(df, columna):
     return dict(sorted(contador.items(), key=lambda x: x[1], reverse=True))
 
 
+def _panel_contar_frecuencias_simple(df, columna):
+    """Cuenta frecuencias de un campo de texto simple (no lista), como perfil_preparatoria."""
+    contador = {}
+    for valor in df[columna]:
+        valor = (valor or "").strip()
+        if valor:
+            contador[valor] = contador.get(valor, 0) + 1
+    return dict(sorted(contador.items(), key=lambda x: x[1], reverse=True))
+
+
 def _panel_universidades_de_interes(df):
     """Unión de unis_seleccionadas + perfil_universidades_interes por alumno (sin duplicar)."""
     contador = {}
@@ -2663,8 +2477,9 @@ def _panel_generar_perfil_universidad_ia(nombre_uni, sub_df):
     edades = [e for e in sub_df["perfil_edad"].tolist() if isinstance(e, (int, float))]
     carreras_contador = _panel_contar_frecuencias(sub_df, "perfil_carreras")
     top_carreras = ", ".join(f"{c} ({n})" for c, n in list(carreras_contador.items())[:8]) or "no especificadas"
+    prepas_contador = _panel_contar_frecuencias_simple(sub_df, "perfil_preparatoria")
+    top_prepas = ", ".join(f"{p} ({n})" for p, n in list(prepas_contador.items())[:8]) or "no especificadas"
     n_total = len(sub_df)
-    n_pro = int((sub_df["plan"] == "pro").sum())
     n_simulador = int(sub_df["simulador_usado"].sum())
     promedios = []
     for res in sub_df["resultados_simulador"]:
@@ -2678,7 +2493,7 @@ def _panel_generar_perfil_universidad_ia(nombre_uni, sub_df):
         f"Alumnos interesados en la plataforma: {n_total}\n"
         f"Edad promedio: {round(sum(edades)/len(edades),1) if edades else 'sin dato'}\n"
         f"Carreras de interés más comunes entre ellos: {top_carreras}\n"
-        f"Usuarios plan Pro entre ellos: {n_pro} de {n_total}\n"
+        f"Preparatorias de origen más comunes entre ellos: {top_prepas}\n"
         f"Usaron el simulador de admisión: {n_simulador} de {n_total}\n"
         f"Probabilidad de admisión estimada promedio (simulador): "
         f"{prob_promedio if prob_promedio is not None else 'sin dato suficiente'}%"
@@ -2696,13 +2511,51 @@ def _panel_generar_perfil_universidad_ia(nombre_uni, sub_df):
                 "profesional y directo, tipo 'insight de negocio': qué perfil predomina, qué "
                 "carreras buscan y por qué crees (con base en los datos) que eligen esta "
                 "universidad. Si los datos son insuficientes para algo, dilo brevemente en vez de "
-                "inventar."
+                "inventar. No uses emojis."
             ),
         )
         respuesta = model.generate_content(resumen_stats)
-        return respuesta.text
+        return _quitar_emojis(respuesta.text)
     except Exception as e:
         return f"No se pudo generar el análisis con Hugo en este momento ({e})."
+
+
+def _panel_render_bloque_perfil_ia(_uni, _df_panel, expanded=True):
+    """Renderiza el bloque expandible de 'análisis de perfil con Hugo' para una
+    universidad específica. Reutilizado tanto en el panel de admin (una vez por
+    universidad) como en el panel de universidad (una sola vez, para la suya)."""
+    _sub = _panel_alumnos_de_universidad(_df_panel, _uni)
+    with st.expander(f"{_uni}  ·  {len(_sub)} alumno(s) interesado(s)", expanded=expanded):
+        if _sub.empty:
+            st.caption("Todavía no hay alumnos interesados en esta universidad en este alcance.")
+            return
+        _clave_cache = f"panel_perfil_ia_{_uni}_{len(_sub)}"
+        col_btn, _ = st.columns([1, 3])
+        with col_btn:
+            _generar = st.button("Generar análisis con Hugo", key=f"btn_{_clave_cache}")
+        if _generar or _clave_cache in st.session_state:
+            if _generar:
+                with st.spinner("Hugo está analizando el perfil..."):
+                    st.session_state[_clave_cache] = _panel_generar_perfil_universidad_ia(_uni, _sub)
+            st.markdown(f"""<div style="background:#F5F5F3;border-radius:10px;padding:14px 18px;
+                font-size:0.9rem;color:#333;line-height:1.6;margin-top:0.5rem;">
+                <strong style="color:#4A5D32;">Hugo dice:</strong> {st.session_state.get(_clave_cache, "")}
+                </div>""", unsafe_allow_html=True)
+            _texto_descarga = (
+                f"Perfil de alumnos interesados en {_uni} — Uniwebmx\n"
+                f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+                f"Alumnos analizados: {len(_sub)}\n\n"
+                f"{st.session_state.get(_clave_cache, '')}\n"
+            )
+            st.download_button(
+                "Descargar este análisis (.txt)",
+                data=_texto_descarga.encode("utf-8"),
+                file_name=f"perfil_{_uni.replace(' ', '_')}.txt",
+                mime="text/plain",
+                key=f"dl_{_clave_cache}",
+            )
+        else:
+            st.caption("Da clic para que Hugo te resuma el perfil típico de quienes aplican aquí.")
 
 
 def _panel_responder_consultor(pregunta, df, historial):
@@ -2719,7 +2572,6 @@ def _panel_responder_consultor(pregunta, df, historial):
         f"Total de alumnos en este alcance: {len(df)}\n"
         f"Perfil completo: {int(df['perfil_completo'].sum())}\n"
         f"Usaron el simulador: {int(df['simulador_usado'].sum())}\n"
-        f"Plan Pro: {int((df['plan']=='pro').sum())}\n"
         f"Mensajes totales enviados a Hugo: {total_mensajes}\n"
         f"Top carreras de interés: {list(top_carreras.items())[:10]}\n"
         f"Top universidades de interés: {list(top_unis.items())[:10]}\n"
@@ -2737,13 +2589,14 @@ def _panel_responder_consultor(pregunta, df, historial):
                 "de uso de la plataforma; tu trabajo es ayudar a interpretarlas, encontrar patrones "
                 "y sugerir acciones. Responde en español, de forma concisa y concreta. Si te "
                 "preguntan algo que no puedes saber con estos datos (por ejemplo información "
-                "individual de un alumno específico), dilo claramente en vez de inventar.\n\n"
+                "individual de un alumno específico), dilo claramente en vez de inventar. No uses "
+                "emojis en tus respuestas.\n\n"
                 f"[DATOS DISPONIBLES]\n{contexto}"
             ),
         )
         chat = model.start_chat(history=historial_gemini[:-1])
         respuesta = chat.send_message(pregunta)
-        return respuesta.text
+        return _quitar_emojis(respuesta.text)
     except Exception as e:
         return f"No pude procesar tu pregunta en este momento ({e})."
 
@@ -2792,7 +2645,7 @@ def rol_universidad_nombre():
 #       creado_en timestamptz not null default now()
 #   );
 # Tipos de evento que se registran: 'registro', 'login', 'mensaje_chat',
-# 'simulador_usado', 'pago_pro'.
+# 'simulador_usado'.
 def _log_evento(username, tipo_evento, detalle=None):
     """Guarda un evento con fecha/hora. Nunca debe tumbar la app si falla:
     si la tabla no existe todavía (no has corrido el SQL de arriba) o hay
@@ -2835,36 +2688,52 @@ if st.session_state.page == "inicio":
    """, unsafe_allow_html=True)
   
    st.markdown("<h2 style='text-align: center; margin-top: 1rem; margin-bottom: 2.5rem;'>Herramientas diseñadas para tu admisión</h2>", unsafe_allow_html=True)
-  
-   col_card1, col_card2, col_card3 = st.columns(3)
-   with col_card1:
-       st.markdown("""
-       <div class="card-beneficio">
-           <h3>Locker Digital</h3>
-           <p style='color: #444444; line-height: 1.5; margin-bottom:0;'>Tus logros en un solo espacio seguro. Sube tu kárdex, ensayos previos, diplomas y proyectos extracurriculares. Mantén tu historial listo para cualquier convocatoria.</p>
+
+   # --- CARRUSEL CONTINUO ---
+   # Cada tarjeta usa la foto subida (fondo_carrusel_*.png); si todavía no
+   # existe ese archivo, cae a un degradado de color para que la página
+   # nunca se rompa por una imagen faltante.
+   _carrusel_slides = [
+       ("Locker digital", "Kárdex, ensayos y diplomas en un solo lugar.", carrusel_locker_encoded, "linear-gradient(135deg,#5C6B4A,#7C8A6A)"),
+       ("Consultor IA", "Retroalimentación en tiempo real de Hugo.", carrusel_consultor_encoded, "linear-gradient(135deg,#6B5D3F,#8C7B54)"),
+       ("Simulador estadístico", "Tus probabilidades reales de aceptación.", carrusel_simulador_encoded, "linear-gradient(135deg,#4A5A5C,#6B8083)"),
+   ]
+
+   def _uw_slide_html(titulo, desc, img_b64, fallback_bg):
+       _bg_style = f"background-image:url('data:image/png;base64,{img_b64}');" if img_b64 else f"background:{fallback_bg};"
+       return f"""
+       <div class="uw-slide" style="{_bg_style}">
+           <div class="uw-slide-overlay"></div>
+           <div class="uw-slide-text">
+               <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px;">{titulo}</div>
+               <div style="font-size:12px;color:rgba(255,255,255,0.85);line-height:1.5;">{desc}</div>
+           </div>
+       </div>"""
+
+   _uw_slides_html = "".join(_uw_slide_html(*s) for s in _carrusel_slides) * 2  # x2 para el loop continuo
+
+   st.markdown(f"""
+   <div class="uw-carrusel-viewport">
+       <div class="uw-carrusel-track">
+           {_uw_slides_html}
        </div>
-       """, unsafe_allow_html=True)
-   with col_card2:
-       st.markdown("""
-       <div class="card-beneficio">
-           <h3>Consultor de IA</h3>
-           <p style='color: #444444; line-height: 1.5; margin-bottom:0;'>Retroalimentación experta en tiempo real. Un guía inteligente que analiza tus documentos, corrige la estructura de tus ensayos de motivos y te dice qué mejorar.</p>
-       </div>
-       """, unsafe_allow_html=True)
-   with col_card3:
-       st.markdown("""
-       <div class="card-beneficio">
-           <h3>Simulador Estadístico</h3>
-           <p style='color: #444444; line-height: 1.5; margin-bottom:0;'>Visualiza tus probabilidades reales. Compara tu perfil académico actual con las tendencias históricas de aceptación de las mejores universidades del país.</p>
-       </div>
-       """, unsafe_allow_html=True)
+   </div>
+   <div style="text-align:center;font-size:11px;color:#999;margin-top:14px;">pasa el mouse encima para pausar</div>
+   """, unsafe_allow_html=True)
 
 
    # --- SECCIÓN ADICIONAL: QUIÉNES SOMOS Y MISIÓN ---
    st.markdown('<div class="divider-olivo"></div>', unsafe_allow_html=True)
    col_qs, col_ms = st.columns(2, gap="large")
    with col_qs:
-       st.markdown("<h2>Quiénes Somos</h2>", unsafe_allow_html=True)
+       st.markdown("""
+       <div class="uw-somos-icon">
+           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A5D32" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+           </svg>
+       </div>
+       <h2>Quiénes Somos</h2>
+       """, unsafe_allow_html=True)
        st.markdown("""
        <p style='color: #444444; line-height: 1.7; font-size: 1.05rem;'>
            Somos un equipo interdisciplinario apasionado por democratizar y optimizar el acceso a la educación superior en México.
@@ -2872,7 +2741,14 @@ if st.session_state.page == "inicio":
        </p>
        """, unsafe_allow_html=True)
    with col_ms:
-       st.markdown("<h2>Nuestra Misión</h2>", unsafe_allow_html=True)
+       st.markdown("""
+       <div class="uw-somos-icon">
+           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A5D32" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+               <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+           </svg>
+       </div>
+       <h2>Nuestra Misión</h2>
+       """, unsafe_allow_html=True)
        st.markdown("""
        <p style='color: #444444; line-height: 1.7; font-size: 1.05rem;'>
            Transformar los procesos de admisión universitaria en experiencias claras, organizadas y equitativas.
@@ -3028,100 +2904,6 @@ elif st.session_state.page == "blog":
         </div>
         """, unsafe_allow_html=True)
 
-
-# --- VISTA: PLANES ---
-elif st.session_state.page == "planes":
-    st.markdown("""
-    <div style="max-width:900px;margin:0 auto;padding-top:2rem;text-align:center;">
-        <p style="font-size:0.8rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#4A5D32;margin-bottom:0.5rem;">Precios</p>
-        <h1 style="font-size:2.8rem;font-weight:700;color:#1A1A1A;letter-spacing:-0.03em;margin-bottom:0.5rem;">El plan correcto para tu etapa</h1>
-        <p style="font-size:1.1rem;color:#666666;line-height:1.7;margin-bottom:3.5rem;max-width:580px;margin-left:auto;margin-right:auto;">Sin letra chica. Pago único anual. Empieza gratis hoy.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_p1, col_espaciado, col_p2 = st.columns([1, 0.15, 1], gap="large")
-
-    plan_css_base = "border:1px solid #EAEAEA;border-radius:12px;padding:32px 24px;background:#FFFFFF;height:100%;"
-    plan_css_pro  = "border:2px solid #4A5D32;border-radius:12px;padding:32px 24px;background:#FFFFFF;height:100%;position:relative;"
-
-    def check(texto):
-        return f'<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;"><span style="color:#4A5D32;font-weight:700;flex-shrink:0;">✓</span><span style="font-size:0.9rem;color:#444444;">{texto}</span></div>'
-
-    def cross(texto):
-        return f'<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;"><span style="color:#CCCCCC;flex-shrink:0;">✗</span><span style="font-size:0.9rem;color:#BBBBBB;">{texto}</span></div>'
-
-    with col_p1:
-        st.markdown(f"""
-        <div style="{plan_css_base}">
-            <p style="font-size:0.75rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#888;margin-bottom:8px;">Gratis</p>
-            <div style="margin-bottom:6px;"><span style="font-size:2.4rem;font-weight:700;color:#1A1A1A;">$0</span></div>
-            <p style="font-size:0.85rem;color:#888;margin-bottom:4px;">Para explorar la plataforma</p>
-            <p style="font-size:0.78rem;color:#BBBBBB;margin-bottom:24px;">Sin tarjeta de crédito</p>
-            <div style="border-top:1px solid #F0F0F0;padding-top:20px;">
-                {check("Acceso al ranking de universidades")}
-                {check("Blog completo de admisiones")}
-                {check("Locker Digital — hasta 50 MB")}
-                {check("Simulador estadístico — 1 simulación")}
-                {check("Consultor Hugo IA — 3 mensajes diarios")}
-                {cross("Locker Digital ilimitado")}
-                {cross("Hugo IA — 20 mensajes diarios")}
-                {cross("Simulador ilimitado")}
-            </div>
-            <a href="/?page=registro" target="_self" style="display:block;text-align:center;text-decoration:none;font-family:Montserrat,sans-serif;font-size:0.95rem;font-weight:600;color:#1A1A1A;padding:14px 20px;border:1.5px solid #D0D0D0;border-radius:8px;background:#fff;margin-top:24px;transition:background 0.15s,border-color 0.15s;">Comenzar gratis</a>
-        </div>
-        """, unsafe_allow_html=True)
-
-    _logged = st.session_state.get("logged_in", False)
-    _user_planes = st.session_state.get("user", "")
-    _token_planes = st.session_state.get("session_token", "")
-    if _logged and not _token_planes:
-        # Sesión antigua sin token (p. ej. de antes de esta migración): genera uno ahora.
-        _token_planes = crear_sesion_token(_user_planes)
-        st.session_state.session_token = _token_planes
-    if _logged:
-        try:
-            _url_mensual = crear_sesion_stripe(st.secrets["STRIPE_PRICE_MENSUAL"], _user_planes, _token_planes)
-            _url_anual   = crear_sesion_stripe(st.secrets["STRIPE_PRICE_ANUAL"],   _user_planes, _token_planes)
-        except Exception as e:
-            _notificar_error_admin("crear_sesion_stripe (página planes)", e, extra=f"username={_user_planes}")
-            _url_mensual = "#"
-            _url_anual = "#"
-            st.error("No pudimos conectar con la pasarela de pago en este momento. Intenta de nuevo en unos minutos.")
-    else:
-        _url_mensual = "/?page=login"
-        _url_anual   = "/?page=login"
-
-    with col_p2:
-        st.markdown(f"""
-        <div style="{plan_css_pro}">
-            <div style="position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:#4A5D32;color:#FFF;font-size:0.72rem;font-weight:700;padding:4px 16px;border-radius:20px;white-space:nowrap;letter-spacing:.06em;">PRO</div>
-            <p style="font-size:0.75rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#4A5D32;margin-bottom:8px;">Pro</p>
-            <div style="margin-bottom:2px;">
-                <div style="display:flex;align-items:flex-end;gap:6px;margin-bottom:4px;">
-                    <span style="font-size:2.4rem;font-weight:700;color:#1A1A1A;">$79</span>
-                    <span style="font-size:1rem;color:#888;padding-bottom:6px;">/ mes</span>
-                </div>
-                <div style="display:flex;align-items:flex-end;gap:6px;">
-                    <span style="font-size:1.3rem;font-weight:600;color:#4A5D32;">$799</span>
-                    <span style="font-size:0.85rem;color:#4A5D32;padding-bottom:3px;">/ año &nbsp;<span style="background:#EEF1E9;padding:2px 8px;border-radius:10px;font-size:0.72rem;">2 meses gratis</span></span>
-                </div>
-            </div>
-            <p style="font-size:0.85rem;color:#888;margin-bottom:4px;">Para maximizar tu ingreso universitario</p>
-            <p style="font-size:0.78rem;color:#BBBBBB;margin-bottom:24px;">Cancela cuando quieras</p>
-            <div style="border-top:1px solid #F0F0F0;padding-top:20px;">
-                {check("Todo lo del plan Gratis")}
-                {check("Locker Digital ilimitado en la nube")}
-                {check("Hugo IA — 20 mensajes diarios")}
-                {check("Simulador estadístico ilimitado")}
-                {check("Documentos disponibles desde cualquier dispositivo")}
-                {check("Co-creación de ensayos y currículum con IA")}
-            </div>
-            <div style="display:flex;gap:10px;margin-top:24px;">
-                <a href="{_url_mensual}" target="_self" style="flex:1;display:block;text-align:center;text-decoration:none;font-family:Montserrat,sans-serif;font-size:0.9rem;font-weight:600;color:#4A5D32;padding:13px 10px;border-radius:8px;background:#EEF1E9;transition:background 0.15s;">Mensual $79</a>
-                <a href="{_url_anual}" target="_self" style="flex:1;display:block;text-align:center;text-decoration:none;font-family:Montserrat,sans-serif;font-size:0.9rem;font-weight:600;color:#FFFFFF;padding:13px 10px;border-radius:8px;background:#4A5D32;transition:background 0.15s;">Anual $799</a>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
 
 # --- VISTA: REGISTRO ---
 elif st.session_state.page == "registro":
@@ -3314,10 +3096,6 @@ elif st.session_state.page == "login":
                 st.session_state.session_token = crear_sesion_token(_login_username)
                 restaurar_sesion_usuario(_login_username)
                 _log_evento(_login_username, "login")
-                # Red de seguridad: si pagó pero cerró la pestaña antes de que
-                # se confirmara el pago, lo verificamos aquí también.
-                if verificar_pago_pendiente(_login_username):
-                    st.session_state.plan_usuario = "pro"
                 if puede_ver_panel():
                     cambiar_pagina("panel_admin")
                 elif st.session_state.get("perfil_completo"):
@@ -3486,74 +3264,6 @@ elif st.session_state.page == "reset_contrasena":
                             st.success("¡Contraseña actualizada! Ya puedes iniciar sesión.")
                             st.markdown('<div style="text-align:center;margin-top:1rem;"><a href="/?page=login" target="_self" style="font-family:Montserrat,sans-serif;font-size:0.9rem;font-weight:600;color:#4A5D32;text-decoration:none;">Ir a iniciar sesión →</a></div>', unsafe_allow_html=True)
 
-# --- VISTA: PAGO EXITOSO ---
-elif st.session_state.page == "pago_exitoso":
-    # _user solo puede venir de session_state.user, que a este punto ya fue
-    # poblado (en el bloque "Fallback" de arriba) mediante un token validado
-    # contra Supabase — nunca se lee un username crudo desde la URL aquí.
-    _user = st.session_state.get("user", "")
-    _token_pago = st.session_state.get("session_token", "")
-    _session_id = (st.query_params.get("session_id", "") or st.session_state.get("_stripe_session_id", ""))
-
-    if _user:
-        if "_pago_ya_verificado" not in st.session_state:
-            with st.spinner("Confirmando tu pago con Stripe..."):
-                activado = verificar_y_activar_pago(_session_id, _user)
-            st.session_state["_pago_ya_verificado"] = True
-            st.session_state["_pago_activado_ok"] = activado
-            if activado:
-                st.session_state.plan_usuario = "pro"
-                if "_correo_pro_enviado" not in st.session_state:
-                    _res_email = supabase_client.table("usuarios").select("email").eq("username", _user).execute()
-                    _email_pro = (_res_email.data[0].get("email") or "") if _res_email.data else ""
-                    if _email_pro:
-                        enviar_correo_bienvenida_pro(_email_pro)
-                    st.session_state["_correo_pro_enviado"] = True
-
-    if st.session_state.get("_pago_activado_ok"):
-        _logo_pro_html = (
-            f'<img src="data:image/png;base64,{logo_pro_encoded}" style="width:100%;display:block;margin:0 auto 1.8rem;border-radius:8px;">'
-            if logo_pro_encoded else (
-                f'<img src="data:image/png;base64,{logo_encoded}" style="width:100%;display:block;margin:0 auto 1.8rem;border-radius:8px;">'
-                if logo_encoded else
-                '<div style="font-family:Montserrat,sans-serif;font-size:1.3rem;font-weight:700;letter-spacing:-0.03em;color:#4A5D32;margin-bottom:1.8rem;">uniwebmx <span style=\'font-size:0.7rem;font-weight:600;background:#4A5D32;color:#fff;padding:2px 9px;border-radius:20px;vertical-align:middle;letter-spacing:0.05em;\'>PRO</span></div>'
-            )
-        )
-        st.markdown(f"""
-        <div style="max-width:520px;margin:5rem auto;text-align:center;padding:3.5rem 3rem;border:1px solid #EAEAEA;border-radius:16px;background:#fff;">
-            {_logo_pro_html}
-            <h1 style="font-size:1.9rem;font-weight:700;color:#1A1A1A;margin-bottom:0.75rem;font-family:Montserrat,sans-serif;">¡Bienvenido a Pro!</h1>
-            <p style="font-size:1rem;color:#666;line-height:1.75;margin-bottom:2.5rem;font-family:Montserrat,sans-serif;">
-                Tu cuenta ya tiene acceso ilimitado al Locker Digital,<br>20 mensajes diarios con Hugo y el Simulador sin límites.
-            </p>
-            <a href="/?nav=locker&t={_token_pago}" target="_self" style="display:inline-block;background:#4A5D32;color:#fff;font-family:Montserrat,sans-serif;font-size:0.95rem;font-weight:600;padding:14px 40px;border-radius:8px;text-decoration:none;letter-spacing:0.01em;">
-                Ir a mi cuenta →
-            </a>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="max-width:520px;margin:5rem auto;text-align:center;padding:3.5rem 3rem;border:1px solid #EAEAEA;border-radius:16px;background:#fff;">
-            <div style="width:48px;height:48px;background:#FEF3C7;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 1.5rem;font-size:1.3rem;">!</div>
-            <h1 style="font-size:1.6rem;font-weight:700;color:#1A1A1A;margin-bottom:0.75rem;font-family:Montserrat,sans-serif;">No pudimos confirmar tu pago todavía</h1>
-            <p style="font-size:0.95rem;color:#666;line-height:1.75;margin-bottom:2.5rem;font-family:Montserrat,sans-serif;">
-                Si Stripe ya te cobró, espera un momento e intenta de nuevo,<br>o contáctanos con tu correo de confirmación.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-        col_rv1, col_rv2, col_rv3 = st.columns([1, 1, 1])
-        with col_rv2:
-            st.markdown('<div class="btn-form-submit">', unsafe_allow_html=True)
-            if st.button("Reintentar verificación", key="reintentar_pago", use_container_width=True):
-                st.session_state.pop("_pago_ya_verificado", None)
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-            st.markdown('<div class="btn-link-highlight" style="text-align:center;margin-top:0.75rem;">', unsafe_allow_html=True)
-            if st.button("Volver a Planes", key="volver_planes_pago"):
-                st.session_state.pop("_pago_ya_verificado", None)
-                cambiar_pagina("planes")
-            st.markdown('</div>', unsafe_allow_html=True)
-
 # --- VISTA: ONBOARDING (perfil inicial, una sola vez tras el primer login) ---
 elif st.session_state.page == "onboarding":
     _user = st.session_state.get("user")
@@ -3622,6 +3332,14 @@ elif st.session_state.page == "onboarding":
             key="onb_universidades",
             help="Esto también se usará para armar tus carpetas en 'Mi Aplicación' y precargar el Simulador.",
         )
+        _preparatorias_opciones = ["Ciencias", "PrepaTec", "Cervantes Costa Rica", "American School", "Otra"]
+        _preparatoria_guardada = st.session_state.get("perfil_preparatoria", "")
+        preparatoria_onboarding = st.selectbox(
+            "¿De qué preparatoria vienes?",
+            options=_preparatorias_opciones,
+            index=_preparatorias_opciones.index(_preparatoria_guardada) if _preparatoria_guardada in _preparatorias_opciones else 0,
+            key="onb_preparatoria",
+        )
 
         st.markdown('<div class="btn-form-submit">', unsafe_allow_html=True)
         continuar_btn = st.button("Continuar a mi cuenta", key="onb_continuar")
@@ -3642,6 +3360,7 @@ elif st.session_state.page == "onboarding":
                 st.session_state.perfil_edad = int(edad_onboarding)
                 st.session_state.perfil_carreras = carreras_onboarding
                 st.session_state.perfil_universidades_interes = unis_onboarding
+                st.session_state.perfil_preparatoria = preparatoria_onboarding
                 st.session_state.perfil_completo = True
                 # Guardar email si no lo tenían
                 if not _email_guardado and _email_onb_val:
@@ -3720,18 +3439,12 @@ elif st.session_state.page == "locker":
                 key=f"up_{key}"
             )
             if archivo is not None and doc.get("nombre") != archivo.name:
-                # Verificar límite de tamaño para plan gratis
-                _limite_mb = LIMITES[get_plan()]["locker_mb"]
-                if _limite_mb is not None and len(archivo.getvalue()) > _limite_mb * 1024 * 1024:
-                    _banner_upgrade(f"Este archivo supera el límite de {_limite_mb}MB del plan gratis. Mejora a Pro para subir archivos sin límite.")
-                else:
-                    with st.spinner("Guardando..."):
-                        guardar_archivo_original(_user, key, archivo.name, archivo.getvalue())
-                        texto = extraer_texto_archivo(archivo) if archivo.type in ["application/pdf","text/plain"] else ""
-                        st.session_state[sk] = {"nombre": archivo.name, "contenido": texto}
-                        guardar_datos_usuario(_user)
-                    st.toast(f"'{archivo.name}' guardado.")
-                    st.rerun()
+                with st.spinner("Guardando..."):
+                    guardar_archivo_original(_user, key, archivo.name, archivo.getvalue())
+                    texto = extraer_texto_archivo(archivo) if archivo.type in ["application/pdf","text/plain"] else ""
+                    st.session_state[sk] = {"nombre": archivo.name, "contenido": texto}
+                    guardar_datos_usuario(_user)
+                st.toast(f"'{archivo.name}' guardado.")
 
     # ── Sección: Documentos académicos ───────────────────────────────────────
     st.markdown("""
@@ -4035,8 +3748,7 @@ elif st.session_state.page == "chat":
         st.session_state.contador_consultas = 0
         st.session_state.fecha_contador = hoy_str
 
-    _plan_chat = get_plan()
-    LIMITE_DIARIO = LIMITES[_plan_chat]["hugo_diario"]
+    LIMITE_DIARIO = LIMITE_HUGO_DIARIO
 
     st.markdown('<div class="gemini-chat-container">', unsafe_allow_html=True)
   
@@ -4046,14 +3758,24 @@ elif st.session_state.page == "chat":
         ]
   
     for msg in st.session_state.historial_chat:
-        rol_label = "Tú" if msg["role"] == "user" else "Hugo"
-        clase = "gemini-user-label" if msg["role"] == "user" else "gemini-hugo-label"
-        st.markdown(f"""
-        <div class="gemini-row">
-            <div class="{clase}">{rol_label}</div>
-            <div class="gemini-text">{msg["content"]}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        if msg["role"] == "user":
+            st.markdown(f"""
+            <div class="gemini-row gemini-row-user">
+                <div class="gemini-bubble gemini-bubble-user">
+                    <div class="gemini-user-label">Tú</div>
+                    <div class="gemini-text">{msg["content"]}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="gemini-row gemini-row-hugo">
+                <div class="gemini-bubble gemini-bubble-hugo">
+                    <div class="gemini-hugo-label">Hugo</div>
+                    <div class="gemini-text">{msg["content"]}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
           
     st.markdown('</div>', unsafe_allow_html=True)
   
@@ -4062,10 +3784,7 @@ elif st.session_state.page == "chat":
     if prompt_chat:
         # VERIFICACIÓN DE LÍMITE
         if st.session_state.contador_consultas >= LIMITE_DIARIO:
-            if get_plan() == "gratis":
-                _banner_upgrade(f"Alcanzaste tu límite de {LIMITE_DIARIO} mensajes diarios con Hugo. Mejora a Pro para obtener 20 mensajes diarios.")
-            else:
-                st.warning("Has alcanzado tu límite diario de 20 consultas con Hugo. Intenta mañana.")
+            st.warning(f"Has alcanzado tu límite diario de {LIMITE_DIARIO} consultas con Hugo. Intenta mañana.")
         else:
             st.session_state.historial_chat.append({"role": "user", "content": prompt_chat})
             _log_evento(st.session_state.get("user", ""), "mensaje_chat")
@@ -4140,12 +3859,13 @@ elif st.session_state.page == "chat":
                             "junto a una universidad en la base de conocimiento.\n"
                             "4. Si te preguntan sobre una universidad que no está en tu base de "
                             "conocimiento, dilo explícitamente y ofrece ayudar con lo que sí tienes "
-                            "verificado, en vez de inventar cifras."
+                            "verificado, en vez de inventar cifras.\n\n"
+                            "No uses emojis en tus respuestas."
                         ),
                     )
                     chat = model.start_chat(history=historial_gemini)
                     respuesta = chat.send_message(prompt_chat + info_doc)
-                    texto_hugo = respuesta.text
+                    texto_hugo = _quitar_emojis(respuesta.text)
                     
                     # INCREMENTAR CONTADOR SOLO SI LA LLAMADA ES EXITOSA
                     st.session_state.contador_consultas += 1
@@ -4183,13 +3903,6 @@ elif st.session_state.page == "simulador":
 
     if "unis_seleccionadas" not in st.session_state:
         st.session_state.unis_seleccionadas = []
-
-    # --- Control de uso del simulador según plan ---
-    _plan_sim = get_plan()
-    _sim_usado = st.session_state.get("simulador_usado", False)
-    if _plan_sim == "gratis" and _sim_usado:
-        _banner_upgrade("Ya usaste tu simulación gratuita. Mejora a Pro para simulaciones ilimitadas.")
-        st.stop()
 
     unis_para_simular = st.multiselect(
         "¿A qué universidades quieres aplicar? (puedes ajustarlo también en 'Mi Aplicación')",
@@ -4268,8 +3981,7 @@ elif st.session_state.page == "simulador":
                     r["prob_final"] = max(5, min(98, round(r["prob_base"] + r["ajuste_ia"], 1)))
 
                 st.session_state.resultados_simulador = resultados
-                if get_plan() == "gratis":
-                    st.session_state.simulador_usado = True
+                st.session_state.simulador_usado = True
                 _log_evento(st.session_state.get("user", ""), "simulador_usado", {"universidades": list(resultados.keys())})
                 guardar_datos_usuario(st.session_state.get("user"))
 
@@ -4338,16 +4050,14 @@ elif st.session_state.page == "panel_admin":
     else:
         _total = len(_df_panel)
         _perfil_ok = int(_df_panel["perfil_completo"].sum())
-        _pro = int((_df_panel["plan"] == "pro").sum())
         _simulador = int(_df_panel["simulador_usado"].sum())
         _mensajes = sum(1 for h in _df_panel["historial_chat"] for m in (h or []) if m.get("role") == "user")
         _con_chat = sum(1 for h in _df_panel["historial_chat"] if any(m.get("role") == "user" for m in (h or [])))
 
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3 = st.columns(3)
         c1.metric("Alumnos", _total)
         c2.metric("Perfil completo", f"{_perfil_ok}/{_total}")
-        c3.metric("Plan Pro", f"{_pro}/{_total}")
-        c4.metric("Usaron el simulador", f"{_simulador}/{_total}")
+        c3.metric("Usaron el simulador", f"{_simulador}/{_total}")
 
         c5, c6, c7 = st.columns(3)
         c5.metric("Mensajes enviados a Hugo", _mensajes)
@@ -4359,8 +4069,8 @@ elif st.session_state.page == "panel_admin":
         _df_export["mensajes_a_hugo"] = _df_export["historial_chat"].apply(
             lambda h: sum(1 for m in (h or []) if m.get("role") == "user")
         )
-        _cols_export = ["username", "plan", "perfil_edad", "perfil_carreras", "perfil_universidades_interes",
-                        "perfil_completo", "simulador_usado", "mensajes_a_hugo"]
+        _cols_export = ["username", "perfil_edad", "perfil_carreras", "perfil_universidades_interes",
+                        "perfil_preparatoria", "perfil_completo", "simulador_usado", "mensajes_a_hugo"]
         st.download_button(
             "Descargar reporte (CSV)",
             data=_df_export[_cols_export].to_csv(index=False).encode("utf-8"),
@@ -4384,6 +4094,18 @@ elif st.session_state.page == "panel_admin":
                 st.bar_chart(pd.DataFrame(_tu, columns=["Universidad", "Alumnos"]).set_index("Universidad"))
             else:
                 st.caption("Aún no hay suficientes datos.")
+
+        st.markdown("<div style='margin-top:0.5rem;'></div>", unsafe_allow_html=True)
+        st.markdown("##### Preparatorias de origen")
+        _tp = list(_panel_contar_frecuencias_simple(_df_panel, "perfil_preparatoria").items())
+        if _tp:
+            col_tp1, col_tp2 = st.columns([1.3, 1])
+            with col_tp1:
+                st.bar_chart(pd.DataFrame(_tp, columns=["Preparatoria", "Alumnos"]).set_index("Preparatoria"))
+            with col_tp2:
+                st.dataframe(pd.DataFrame(_tp, columns=["Preparatoria", "Alumnos"]), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Aún no hay suficientes datos.")
 
         st.caption("Los datos se actualizan cada 5 minutos. Si acabas de registrar un alumno nuevo, puede tardar en aparecer.")
 
@@ -4423,7 +4145,7 @@ elif st.session_state.page == "panel_chat":
 
         st.markdown("##### Alumnos más activos con Hugo")
         _top_activos = _df_panel[_df_panel["mensajes_usuario"] > 0].sort_values("mensajes_usuario", ascending=False)
-        _cols_mostrar = ["username", "plan", "mensajes_usuario"] if es_admin() else ["mensajes_usuario"]
+        _cols_mostrar = ["username", "mensajes_usuario"] if es_admin() else ["mensajes_usuario"]
         if not _top_activos.empty:
             st.dataframe(_top_activos[_cols_mostrar].head(20), use_container_width=True, hide_index=True)
         else:
@@ -4518,46 +4240,43 @@ elif st.session_state.page == "panel_carreras":
                 st.caption("Aún no hay suficientes datos.")
 
 # --- VISTA: PERFILES POR UNIVERSIDAD (análisis con Hugo) ---
+
+# --- VISTA: PERFILES POR UNIVERSIDAD (análisis con Hugo) — solo panel de administrador ---
 elif st.session_state.page == "panel_perfiles":
     _df_panel = _panel_dataframe_alumnos()
     _panel_header("Perfiles por universidad", "Hugo analiza, en agregado y de forma anónima, quién y por qué aplica a cada universidad.")
     if _df_panel.empty:
         st.info("Todavía no hay datos de alumnos en este alcance.")
     else:
-        _unis_a_mostrar = [rol_universidad_nombre()] if es_universidad() else list(UNIVERSIDADES_DATA.keys())
-        for _uni in _unis_a_mostrar:
-            _sub = _panel_alumnos_de_universidad(_df_panel, _uni)
-            with st.expander(f"{_uni}  ·  {len(_sub)} alumno(s) interesado(s)", expanded=es_universidad()):
-                if _sub.empty:
-                    st.caption("Todavía no hay alumnos interesados en esta universidad en este alcance.")
-                    continue
-                _clave_cache = f"panel_perfil_ia_{_uni}_{len(_sub)}"
-                col_btn, _ = st.columns([1, 3])
-                with col_btn:
-                    _generar = st.button("Generar análisis con Hugo", key=f"btn_{_clave_cache}")
-                if _generar or _clave_cache in st.session_state:
-                    if _generar:
-                        with st.spinner("Hugo está analizando el perfil..."):
-                            st.session_state[_clave_cache] = _panel_generar_perfil_universidad_ia(_uni, _sub)
-                    st.markdown(f"""<div style="background:#F5F5F3;border-radius:10px;padding:14px 18px;
-                        font-size:0.9rem;color:#333;line-height:1.6;margin-top:0.5rem;">
-                        <strong style="color:#4A5D32;">Hugo dice:</strong> {st.session_state.get(_clave_cache, "")}
-                        </div>""", unsafe_allow_html=True)
-                    _texto_descarga = (
-                        f"Perfil de alumnos interesados en {_uni} — Uniwebmx\n"
-                        f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-                        f"Alumnos analizados: {len(_sub)}\n\n"
-                        f"{st.session_state.get(_clave_cache, '')}\n"
-                    )
-                    st.download_button(
-                        "Descargar este análisis (.txt)",
-                        data=_texto_descarga.encode("utf-8"),
-                        file_name=f"perfil_{_uni.replace(' ', '_')}.txt",
-                        mime="text/plain",
-                        key=f"dl_{_clave_cache}",
-                    )
-                else:
-                    st.caption("Da clic para que Hugo te resuma el perfil típico de quienes aplican aquí.")
+        for _uni in list(UNIVERSIDADES_DATA.keys()):
+            _panel_render_bloque_perfil_ia(_uni, _df_panel, expanded=False)
+
+# --- VISTA: CARRERAS Y PERFILES — vista combinada para el panel de universidad ---
+elif st.session_state.page == "panel_carreras_perfiles":
+    _df_panel = _panel_dataframe_alumnos()
+    _panel_header("Carreras y perfiles", "Qué carreras buscan tus alumnos interesados, y el análisis de perfil que arma Hugo.")
+    if _df_panel.empty:
+        st.info("Todavía no hay datos de alumnos en este alcance.")
+    else:
+        st.markdown("##### Top carreras de interés")
+        _tc_cp = _panel_contar_frecuencias(_df_panel, "perfil_carreras")
+        if _tc_cp:
+            _df_tc_cp = pd.DataFrame(list(_tc_cp.items()), columns=["Carrera", "Alumnos"])
+            st.bar_chart(_df_tc_cp.set_index("Carrera"))
+            st.dataframe(_df_tc_cp, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Descargar carreras (CSV)",
+                data=_df_tc_cp.to_csv(index=False).encode("utf-8"),
+                file_name="uniwebmx_top_carreras.csv",
+                mime="text/csv",
+                key="dl_carreras_cp",
+            )
+        else:
+            st.caption("Aún no hay suficientes datos.")
+
+        st.markdown("<div style='margin-top:1.5rem;'></div>", unsafe_allow_html=True)
+        st.markdown("##### Perfil de tus alumnos, analizado por Hugo")
+        _panel_render_bloque_perfil_ia(rol_universidad_nombre(), _df_panel, expanded=True)
 
 # --- VISTA: CONSULTOR HUGO (chat sobre los datos agregados) ---
 elif st.session_state.page == "panel_consultor":
