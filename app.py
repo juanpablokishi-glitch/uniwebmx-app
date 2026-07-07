@@ -1704,16 +1704,19 @@ if es_hub:
        bg = "#EEF1E9" if is_active else "transparent"
        color = "#4A5D32" if is_active else "#666666"
        fw = "500" if is_active else "400"
-       return f'''<a href="/?nav={page_key}&t={_sesion_t}" target="_self" style="
-           display:flex;align-items:center;gap:10px;
-           padding:8px 10px;margin:1px 0;border-radius:6px;
-           background:{bg};color:{color};
-           font-family:Montserrat,sans-serif;font-size:0.85rem;font-weight:{fw};
-           text-decoration:none;cursor:pointer;transition:background 0.1s;">
-           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;">
-               {icon_path}
-           </svg>{label}</a>'''
+       # IMPORTANTE: todo en una sola línea, sin saltos de línea ni indentación.
+       # Un <a> multilínea puede romperse si queda junto a una línea en blanco
+       # (p.ej. cuando otro item condicional se vuelve "" y deja una línea de
+       # puros espacios), porque eso cierra el bloque de HTML de Markdown y el
+       # resto se renderiza como texto/code literal en vez de HTML.
+       return (f'<a href="/?nav={page_key}&t={_sesion_t}" target="_self" '
+               f'style="display:flex;align-items:center;gap:10px;padding:8px 10px;margin:1px 0;'
+               f'border-radius:6px;background:{bg};color:{color};font-family:Montserrat,sans-serif;'
+               f'font-size:0.85rem;font-weight:{fw};text-decoration:none;cursor:pointer;'
+               f'transition:background 0.1s;">'
+               f'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+               f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
+               f'style="flex-shrink:0;opacity:0.7;">{icon_path}</svg>{label}</a>')
 
    _icon_locker = '<path d="M5 8a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><path d="M10 11h4M12 9v4"/>'
    _icon_chat   = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
@@ -1724,52 +1727,62 @@ if es_hub:
    _label_style = "font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#BBBBBB;padding:14px 10px 4px;margin:0;font-family:Montserrat,sans-serif;"
 
    with st.sidebar:
-       st.markdown(f"""
-       <div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">{_logo_html}</div>
-       <p style="{_label_style}">Tu espacio</p>
-       <div style="padding:0 10px;">
-           {_sb_item("Locker Digital", "locker", _icon_locker) if not es_usuario_menor() else ""}
-           {_sb_item("Consultor IA",   "chat",   _icon_chat)}
-           {_sb_item("Mi Aplicación",  "mi_aplicacion", _icon_app)}
-           {_sb_item("Centro de Mensajes", "mensajes", _icon_msg)}
-       </div>
-       <p style="{_label_style}">Análisis</p>
-       <div style="padding:0 10px;">
-           {_sb_item("Simulador", "simulador", _icon_sim)}
-       </div>
-       <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
-       """, unsafe_allow_html=True)
+       _items_espacio = []
+       if not es_usuario_menor():
+           _items_espacio.append(_sb_item("Locker Digital", "locker", _icon_locker))
+       _items_espacio.append(_sb_item("Consultor IA", "chat", _icon_chat))
+       _items_espacio.append(_sb_item("Mi Aplicación", "mi_aplicacion", _icon_app))
+       _items_espacio.append(_sb_item("Centro de Mensajes", "mensajes", _icon_msg))
+       _html_items_espacio = "".join(_items_espacio)
+       _html_items_analisis = _sb_item("Simulador", "simulador", _icon_sim)
+
+       st.markdown(
+           f'<div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">{_logo_html}</div>'
+           f'<p style="{_label_style}">Tu espacio</p>'
+           f'<div style="padding:0 10px;">{_html_items_espacio}</div>'
+           f'<p style="{_label_style}">Análisis</p>'
+           f'<div style="padding:0 10px;">{_html_items_analisis}</div>'
+           f'<div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>',
+           unsafe_allow_html=True,
+       )
 
        # --- Perfil fijo al fondo de la sidebar (menú emergente hacia arriba) ---
        _initials_sb = (_user[:2].upper()) if _user else "U"
 
        # --- Item: darse de baja de correos promocionales ---
        _consiente_promo_actual = st.session_state.get("consentimiento_promocional_actual", False)
-       _baja_promo_item = f"""
-           <a href="/?nav=__baja_promocional__" target="_self" style="display:flex;align-items:center;gap:8px;
-               padding:7px 10px;border-radius:6px;color:#555;font-family:Montserrat,sans-serif;
-               font-size:0.82rem;font-weight:400;text-decoration:none;">
-             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-               <path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/><line x1="3" y1="21" x2="21" y2="3"/>
-             </svg>Dejar de recibir promocionales
-           </a>""" if _consiente_promo_actual else """
-           <div style="padding:7px 10px;color:#AAA;font-family:Montserrat,sans-serif;font-size:0.76rem;">
-             No recibes correos promocionales
-           </div>"""
+       # En una sola línea (sin saltos internos) para que nunca dependa de que
+       # una línea en blanco vecina no rompa el bloque de HTML.
+       if _consiente_promo_actual:
+           _baja_promo_item = (
+               '<a href="/?nav=__baja_promocional__" target="_self" '
+               'style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;'
+               'color:#555;font-family:Montserrat,sans-serif;font-size:0.82rem;font-weight:400;'
+               'text-decoration:none;">'
+               '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+               'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+               '<path d="M4 4h16v16H4z"/><path d="M22 6l-10 7L2 6"/><line x1="3" y1="21" x2="21" y2="3"/>'
+               '</svg>Dejar de recibir promocionales</a>'
+           )
+       else:
+           _baja_promo_item = (
+               '<div style="padding:7px 10px;color:#AAA;font-family:Montserrat,sans-serif;'
+               'font-size:0.76rem;">No recibes correos promocionales</div>'
+           )
 
        # --- Item: eliminar cuenta ---
-       _eliminar_cuenta_item = """
-           <a href="/?nav=__eliminar_cuenta__" target="_self" style="display:flex;align-items:center;gap:8px;
-               padding:7px 10px;border-radius:6px;color:#C0392B;font-family:Montserrat,sans-serif;
-               font-size:0.82rem;font-weight:500;text-decoration:none;">
-             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-               <polyline points="3 6 5 6 21 6"/>
-               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-               <path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-             </svg>Eliminar mi cuenta
-           </a>"""
+       _eliminar_cuenta_item = (
+           '<a href="/?nav=__eliminar_cuenta__" target="_self" '
+           'style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;'
+           'color:#C0392B;font-family:Montserrat,sans-serif;font-size:0.82rem;font-weight:500;'
+           'text-decoration:none;">'
+           '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+           'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+           '<polyline points="3 6 5 6 21 6"/>'
+           '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'
+           '<path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>'
+           '</svg>Eliminar mi cuenta</a>'
+       )
 
        with st.sidebar:
            st.markdown(f"""
@@ -1846,13 +1859,7 @@ if es_hub:
                  <div style="font-size:0.82rem;font-weight:600;color:#1A1A1A;
                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_user}</div>
                </div>
-               <a href="/?nav=__logout__" target="_self" style="display:flex;align-items:center;gap:9px;
-                   padding:8px 14px;color:#555;font-family:Montserrat,sans-serif;
-                   font-size:0.82rem;font-weight:400;text-decoration:none;">
-                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                   <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                   <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+               <a href="/?nav=__logout__" target="_self" style="display:flex;align-items:center;gap:9px;padding:8px 14px;color:#555;font-family:Montserrat,sans-serif;font-size:0.82rem;font-weight:400;text-decoration:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
                  </svg>Cerrar sesión
                </a>
                <div style="border-top:0.5px solid #EAEAEA;margin:4px 0;padding-top:4px;">
@@ -1924,17 +1931,22 @@ if es_hub:
                    """, unsafe_allow_html=True)
                    col_si2, col_no2 = st.columns(2)
                    with col_si2:
-                       st.markdown("""<a href="/?nav=__ejecutar_eliminacion__" target="_self"
-                           style="display:block;text-align:center;font-family:Montserrat,sans-serif;
-                           font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;
-                           text-decoration:none;background:#C0392B;color:#fff;">
-                           Sí, eliminar</a>""", unsafe_allow_html=True)
+                       st.markdown(
+                           '<a href="/?nav=__ejecutar_eliminacion__" target="_self" '
+                           'style="display:block;text-align:center;font-family:Montserrat,sans-serif;'
+                           'font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;'
+                           'text-decoration:none;background:#C0392B;color:#fff;">Sí, eliminar</a>',
+                           unsafe_allow_html=True,
+                       )
                    with col_no2:
-                       st.markdown("""<a href="/?nav=__descartar_accion_cuenta__" target="_self"
-                           style="display:block;text-align:center;font-family:Montserrat,sans-serif;
-                           font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;
-                           text-decoration:none;background:#F5F5F3;color:#1A1A1A;border:1px solid #E0E0E0;">
-                           No, conservar</a>""", unsafe_allow_html=True)
+                       st.markdown(
+                           '<a href="/?nav=__descartar_accion_cuenta__" target="_self" '
+                           'style="display:block;text-align:center;font-family:Montserrat,sans-serif;'
+                           'font-size:0.8rem;font-weight:600;border-radius:8px;padding:9px 0;'
+                           'text-decoration:none;background:#F5F5F3;color:#1A1A1A;border:1px solid #E0E0E0;">'
+                           'No, conservar</a>',
+                           unsafe_allow_html=True,
+                       )
                    st.markdown("</div>", unsafe_allow_html=True)
 
            if st.session_state.pop("_ejecutar_eliminacion_pendiente", False):
@@ -1976,16 +1988,16 @@ if es_panel:
        bg = "#EEF1E9" if is_active else "transparent"
        color = "#4A5D32" if is_active else "#666666"
        fw = "500" if is_active else "400"
-       return f'''<a href="/?nav={page_key}&t={_sesion_t_panel}" target="_self" style="
-           display:flex;align-items:center;gap:10px;
-           padding:8px 10px;margin:1px 0;border-radius:6px;
-           background:{bg};color:{color};
-           font-family:Montserrat,sans-serif;font-size:0.85rem;font-weight:{fw};
-           text-decoration:none;cursor:pointer;transition:background 0.1s;">
-           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:0.7;">
-               {icon_path}
-           </svg>{label}</a>'''
+       # En una sola línea: evita que una línea en blanco vecina (p.ej. un item
+       # condicional vacío) cierre el bloque de HTML y deje esto como texto crudo.
+       return (f'<a href="/?nav={page_key}&t={_sesion_t_panel}" target="_self" '
+               f'style="display:flex;align-items:center;gap:10px;padding:8px 10px;margin:1px 0;'
+               f'border-radius:6px;background:{bg};color:{color};font-family:Montserrat,sans-serif;'
+               f'font-size:0.85rem;font-weight:{fw};text-decoration:none;cursor:pointer;'
+               f'transition:background 0.1s;">'
+               f'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+               f'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
+               f'style="flex-shrink:0;opacity:0.7;">{icon_path}</svg>{label}</a>')
 
    _icon_resumen    = '<rect x="3" y="12" width="4" height="8"/><rect x="10" y="7" width="4" height="13"/><rect x="17" y="3" width="4" height="17"/>'
    _icon_chat_panel = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
@@ -2031,8 +2043,11 @@ if es_panel:
                {_sb_item_panel("Carreras y universidades", "panel_carreras", _icon_carreras)}
                {_sb_item_panel("Perfiles por universidad", "panel_perfiles", _icon_perfiles)}
                {_sb_item_panel("Consultor Hugo", "panel_consultor", _icon_consultor)}
-           </div>
-           {f'<p style="{_label_style_panel}">Administración</p><div style="padding:0 10px;">{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}</div>' if es_admin() else ""}
+           </div>"""
+           + (f'<p style="{_label_style_panel}">Administración</p>'
+              f'<div style="padding:0 10px;">{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}</div>'
+              if es_admin() else "")
+           + """
            <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
            """, unsafe_allow_html=True)
 
@@ -2082,13 +2097,17 @@ if es_hub:
 # =================================================================
 # CONTENIDO LEGAL: AVISO DE PRIVACIDAD Y TÉRMINOS Y CONDICIONES
 # =================================================================
-# NOTA: Estos textos son borradores de trabajo (ver encabezado de cada
-# documento). Deben ser revisados por un abogado especializado antes de
-# publicarse, y los campos entre [corchetes] deben completarse con los
-# datos reales de la empresa antes de salir a producción.
+# NOTA INTERNA (no visible al usuario): estos textos fueron completados y
+# revisados con ayuda de IA para cubrir los elementos que exige la LFPDPPP
+# (identidad del responsable, finalidades primarias/secundarias, consentimiento
+# de menores por doble opt-in, transferencias a terceros/internacionales,
+# plazo de conservación, derechos ARCO). No sustituyen una revisión legal
+# humana formal — se recomienda una revisión puntual y barata (clínica
+# jurídica universitaria o abogado freelance por consulta única) más adelante,
+# sobre todo antes de firmar el primer convenio con una universidad.
 
 AVISO_PRIVACIDAD_MD = """
-> ⚠️ Este documento es un borrador de trabajo, no asesoría legal. Antes de publicarlo, debe ser revisado por un abogado especializado en protección de datos personales en México (LFPDPPP), sobre todo por el manejo de datos de menores de edad. Los campos entre `[corchetes]` deben completarse con tus datos reales antes de publicar.
+*Última actualización: julio de 2026.*
 
 ---
 
@@ -2185,6 +2204,8 @@ Compartimos datos únicamente en estos casos:
 
 No vendemos tus datos personales a nadie, bajo ninguna circunstancia.
 
+**Transferencia internacional de datos:** Supabase y Google (Gemini API) almacenan y procesan información en servidores que pueden estar ubicados fuera de México. Esto implica una transferencia internacional de tus datos personales, necesaria para poder prestarte el servicio (finalidad primaria). Estos proveedores actúan como encargados del tratamiento bajo sus propias políticas de seguridad y no están autorizados a usar tus datos para fines distintos a los aquí descritos.
+
 ---
 
 ## 8. Derechos ARCO y revocación del consentimiento
@@ -2208,6 +2229,8 @@ Puedes revocar el consentimiento de las finalidades secundarias (6.1, 6.2, 6.3) 
 - Implementamos bloqueo temporal de cuenta tras intentos fallidos de inicio de sesión repetidos.
 - Las sesiones se manejan con tokens aleatorios no adivinables, con expiración.
 
+**Plazo de conservación:** conservamos tus datos personales mientras mantengas una cuenta activa en la Plataforma. Si solicitas la eliminación de tu cuenta, eliminaremos o anonimizaremos tus datos personales en un plazo razonable, salvo que exista una obligación legal de conservarlos por más tiempo.
+
 ---
 
 ## 10. Uso de cookies y tecnologías similares
@@ -2224,13 +2247,13 @@ Cualquier modificación a este Aviso de Privacidad será publicada en esta misma
 
 ## 12. Contacto
 
-**[Nombre de la empresa]**
+**Uniwebmx** (Juan Pablo Kishi Gómez)
 Correo: **info@uniwebmx.com**
-[Domicilio, si aplica]
+Zapopan, Jalisco, México
 """
 
 TERMINOS_MD = """
-> ⚠️ Borrador de trabajo, no asesoría legal. Requiere revisión de un abogado antes de publicarse, especialmente por el manejo de menores de edad y el uso de inteligencia artificial. Completa los campos entre `[corchetes]`.
+*Última actualización: julio de 2026.*
 
 ---
 
@@ -2348,8 +2371,8 @@ Estos Términos se rigen por las leyes de los Estados Unidos Mexicanos. Para cua
 
 ## 15. Contacto
 
-**[Nombre de la empresa]**
-Correo: **[correo de contacto]**
+**Uniwebmx** (Juan Pablo Kishi Gómez)
+Correo: **info@uniwebmx.com**
 """
 
 
