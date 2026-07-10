@@ -1116,6 +1116,14 @@ def cambiar_pagina(nombre_pagina):
 
 
 # --- PROCESAMIENTO DE IMÁGENES ---
+# IMPORTANTE: cacheado con st.cache_data. Sin esto, Streamlit re-lee y
+# re-codifica en base64 estas imágenes en CADA rerun de CADA usuario
+# conectado (Streamlit corre el script completo de arriba a abajo en cada
+# interacción). Con varios usuarios activos a la vez eso multiplica el uso
+# de memoria y es la causa más probable de los avisos de "memory limit
+# exceeded" de Render. Con el cache, la lectura + codificación ocurre una
+# sola vez por archivo mientras el proceso siga vivo.
+@st.cache_data(show_spinner=False)
 def get_base64_image(image_path):
    if os.path.exists(image_path):
        with open(image_path, "rb") as img_file:
@@ -1130,9 +1138,16 @@ fondo_auth_encoded = get_base64_image("fondo_auth.png")
 # Fotos del carrusel de la landing (sección "Herramientas"). Sube estos 3
 # archivos a la raíz del proyecto (junto a fondo_hero.png, logo.png, etc.)
 # con estos nombres exactos:
-carrusel_locker_encoded = get_base64_image("fondo_carrusel_locker.png")
-carrusel_consultor_encoded = get_base64_image("fondo_carrusel_consultor.png")
-carrusel_simulador_encoded = get_base64_image("fondo_carrusel_simulador.png")
+# Fotos del carrusel de la landing (sección "Herramientas"). Ya NO se leen del
+# disco ni se codifican en base64: pesan mucho menos servidas como archivo
+# real desde Supabase Storage vía URL, tanto para el navegador como para la
+# memoria del proceso (antes se re-codificaban en cada rerun de cada
+# usuario). Sube los 3 .jpg optimizados al mismo bucket público "assets"
+# que ya usas para el logo, con estos nombres exactos:
+_SUPABASE_STORAGE_BASE = "https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/"
+carrusel_locker_url = f"{_SUPABASE_STORAGE_BASE}fondo_carrusel_locker.jpg"
+carrusel_consultor_url = f"{_SUPABASE_STORAGE_BASE}fondo_carrusel_consultor.jpg"
+carrusel_simulador_url = f"{_SUPABASE_STORAGE_BASE}fondo_carrusel_simulador.jpg"
 
 
 if fondo_inicio_encoded:
@@ -1179,6 +1194,38 @@ st.markdown(f"""
       que no se vea texto roto — mejor sin icono que con texto encimado. */
    [data-testid="stIconMaterial"] {{
        display: none !important;
+   }}
+
+   /* Ocultar el chrome nativo de Streamlit (menú hamburguesa, botón "Deploy",
+      ícono de GitHub, footer "Made with Streamlit"). Esto es lo que se veía
+      como una "barra rara" arriba en cualquier dispositivo: no es un bug de
+      la app, es la interfaz por defecto de Streamlit que nunca se ocultó.
+      No tocamos [data-testid="stSidebar"] aquí porque esa sí es nuestra
+      navegación propia y se necesita en el Hub/Panel. */
+   #MainMenu {{
+       visibility: hidden !important;
+       display: none !important;
+   }}
+   header[data-testid="stHeader"] {{
+       display: none !important;
+       height: 0 !important;
+   }}
+   [data-testid="stToolbar"] {{
+       display: none !important;
+   }}
+   [data-testid="stDecoration"] {{
+       display: none !important;
+   }}
+   footer {{
+       visibility: hidden !important;
+       display: none !important;
+   }}
+   /* Al quitar el header, recuperamos el espacio que dejaba arriba */
+   .stApp {{
+       margin-top: -3.5rem !important;
+   }}
+   [data-testid="stAppViewContainer"] {{
+       padding-top: 0 !important;
    }}
 
    /* Aplicación de Tipografía Global */
@@ -2713,25 +2760,31 @@ if st.session_state.page == "inicio":
    st.markdown("<h2 style='text-align: center; margin-top: 1rem; margin-bottom: 2.5rem;'>Herramientas diseñadas para tu admisión</h2>", unsafe_allow_html=True)
 
    # --- CARRUSEL CONTINUO ---
-   # Cada tarjeta usa la foto subida (fondo_carrusel_*.png); si todavía no
-   # existe ese archivo, cae a un degradado de color para que la página
-   # nunca se rompa por una imagen faltante.
+   # Cada tarjeta usa la foto real servida por URL desde Supabase Storage
+   # (ya no base64 local). Si el archivo aún no está subido al bucket, la
+   # imagen del navegador simplemente no carga y cae al degradado de color
+   # vía el atributo onerror, para que la página nunca se rompa por una
+   # imagen faltante.
    _carrusel_slides = [
-       ("Locker digital", "Kárdex, ensayos y diplomas en un solo lugar.", carrusel_locker_encoded, "linear-gradient(135deg,#5C6B4A,#7C8A6A)"),
-       ("Consultor IA", "Retroalimentación en tiempo real de Hugo.", carrusel_consultor_encoded, "linear-gradient(135deg,#6B5D3F,#8C7B54)"),
-       ("Simulador estadístico", "Tus probabilidades reales de aceptación.", carrusel_simulador_encoded, "linear-gradient(135deg,#4A5A5C,#6B8083)"),
+       ("Locker digital", "Kárdex, ensayos y diplomas en un solo lugar.", carrusel_locker_url, "linear-gradient(135deg,#5C6B4A,#7C8A6A)"),
+       ("Consultor IA", "Retroalimentación en tiempo real de Hugo.", carrusel_consultor_url, "linear-gradient(135deg,#6B5D3F,#8C7B54)"),
+       ("Simulador estadístico", "Tus probabilidades reales de aceptación.", carrusel_simulador_url, "linear-gradient(135deg,#4A5A5C,#6B8083)"),
    ]
 
-   def _uw_slide_html(titulo, desc, img_b64, fallback_bg):
-       _bg_style = f"background-image:url('data:image/png;base64,{img_b64}');" if img_b64 else f"background:{fallback_bg};"
+   def _uw_slide_html(titulo, desc, img_url, fallback_bg):
        return f"""
-       <div class="uw-slide" style="{_bg_style}">
+       <div class="uw-slide" style="background:{fallback_bg};">
+           <img src="{img_url}" loading="lazy" alt=""
+                style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"
+                onerror="this.style.display='none';" />
            <div class="uw-slide-overlay"></div>
            <div class="uw-slide-text">
                <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px;">{titulo}</div>
                <div style="font-size:12px;color:rgba(255,255,255,0.85);line-height:1.5;">{desc}</div>
            </div>
        </div>"""
+
+
 
    _uw_slides_html = "".join(_uw_slide_html(*s) for s in _carrusel_slides) * 2  # x2 para el loop continuo
 
