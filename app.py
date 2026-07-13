@@ -579,27 +579,30 @@ def guardar_datos_usuario(username):
     """Toma lo relevante de session_state y lo persiste en Supabase para ese usuario."""
     if not username:
         return
-    # Los usuarios menores de edad NO tienen Locker Digital persistente: sus documentos
-    # (incluyendo identificaciones y comprobantes sensibles) solo viven en session_state
-    # durante la sesión activa y nunca se guardan en Supabase.
-    _es_menor_guardado = es_usuario_menor()
+    # Los usuarios menores de edad SIN confirmación de su tutor no tienen Locker
+    # Digital persistente: sus documentos (incluyendo identificaciones y
+    # comprobantes sensibles) solo viven en session_state durante la sesión
+    # activa y no se guardan en Supabase. En cuanto el tutor confirma
+    # (tutor_confirmado_actual = True), el locker sí persiste normalmente,
+    # igual que para un usuario mayor de edad.
+    _bloquear_persistencia_docs = es_usuario_menor() and not _tutor_confirmado_fresco(username)
     _doc_vacio = {"nombre": None, "contenido": ""}
     datos = {
         "historial_chat": st.session_state.get("historial_chat", []),
         "contador_consultas": st.session_state.get("contador_consultas", 0),
         "fecha_contador": st.session_state.get("fecha_contador", ""),
         # Documentos académicos
-        "kardex": _doc_vacio if _es_menor_guardado else st.session_state.get("kárdex", _doc_vacio),
-        "ensayo": _doc_vacio if _es_menor_guardado else st.session_state.get("ensayo", _doc_vacio),
-        "curriculum": _doc_vacio if _es_menor_guardado else st.session_state.get("curriculum", _doc_vacio),
-        "cartas": _doc_vacio if _es_menor_guardado else st.session_state.get("cartas", _doc_vacio),
-        "portafolio": _doc_vacio if _es_menor_guardado else st.session_state.get("portafolio", _doc_vacio),
+        "kardex": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("kárdex", _doc_vacio),
+        "ensayo": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("ensayo", _doc_vacio),
+        "curriculum": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("curriculum", _doc_vacio),
+        "cartas": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("cartas", _doc_vacio),
+        "portafolio": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("portafolio", _doc_vacio),
         # Documentos personales
-        "acta": _doc_vacio if _es_menor_guardado else st.session_state.get("acta", _doc_vacio),
-        "curp": _doc_vacio if _es_menor_guardado else st.session_state.get("curp", _doc_vacio),
-        "identificacion": _doc_vacio if _es_menor_guardado else st.session_state.get("identificacion", _doc_vacio),
-        "foto": _doc_vacio if _es_menor_guardado else st.session_state.get("foto", _doc_vacio),
-        "comprobante": _doc_vacio if _es_menor_guardado else st.session_state.get("comprobante", _doc_vacio),
+        "acta": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("acta", _doc_vacio),
+        "curp": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("curp", _doc_vacio),
+        "identificacion": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("identificacion", _doc_vacio),
+        "foto": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("foto", _doc_vacio),
+        "comprobante": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("comprobante", _doc_vacio),
         "resultados_simulador": st.session_state.get("resultados_simulador", None),
         "unis_seleccionadas": st.session_state.get("unis_seleccionadas", []),
         "correo_conectado": st.session_state.get("correo_conectado", ""),
@@ -703,6 +706,25 @@ def restaurar_sesion_usuario(username):
 def es_usuario_menor():
     """True si el usuario en sesión está marcado como menor de edad."""
     return bool(st.session_state.get("es_menor_edad_actual", False))
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _tutor_confirmado_fresco(username):
+    """Consulta directa a Supabase (cache de solo 30s) para saber si el tutor
+    ya confirmó. session_state.tutor_confirmado_actual solo se refresca en el
+    login o en una navegación completa por la sidebar, así que si el alumno
+    se queda con la sesión abierta mientras su tutor confirma en otra
+    pestaña, ese valor se queda desactualizado. Esta función evita ese hueco
+    sin tener que golpear Supabase en cada rerun."""
+    if not username:
+        return False
+    try:
+        res = supabase_client.table("usuarios").select("tutor_confirmado").eq("username", username).execute()
+        if res.data:
+            return bool(res.data[0].get("tutor_confirmado", False))
+    except Exception:
+        pass
+    return False
 
 
 # =================================================================
@@ -1396,6 +1418,79 @@ st.markdown(f"""
    }}
    @media (prefers-reduced-motion: reduce) {{
        .uw-carrusel-track {{ animation: none !important; }}
+   }}
+
+   /* =================================================================
+      RESPONSIVE MOBILE — antes de esto solo existía la regla de
+      prefers-reduced-motion; no había NINGÚN breakpoint real de tamaño
+      de pantalla en todo el archivo, por eso se veía mal en celular.
+      ================================================================= */
+   @media (max-width: 768px) {{
+       /* El truco de "sangrado completo" (margin negativo fijo de -5rem)
+          asume el padding de escritorio de Streamlit (~5rem). En celular
+          ese padding es mucho más chico, así que el margen negativo
+          empujaba el hero fuera de la pantalla. Lo ajustamos al padding
+          real de mobile. */
+       .hero-section-inicio, .hero-section-locker {{
+           margin-left: -1rem !important;
+           margin-right: -1rem !important;
+           width: calc(100% + 2rem) !important;
+           padding: 3rem 1.25rem !important;
+       }}
+       /* Los títulos h1 de cada página están inline a 3.5rem — con
+          !important en el media query sí podemos ganarle a ese inline. */
+       h1 {{
+           font-size: 1.9rem !important;
+           line-height: 1.3 !important;
+       }}
+       .hero-section-inicio p, .hero-section-locker p {{
+           font-size: 1rem !important;
+           line-height: 1.55 !important;
+       }}
+       .hero-green-btn {{
+           padding: 12px 26px !important;
+           font-size: 0.9rem !important;
+       }}
+       /* Carrusel: tarjetas más chicas para que no se corten feo en pantallas angostas */
+       .uw-slide {{
+           width: 220px !important;
+           height: 160px !important;
+       }}
+       .uw-carrusel-viewport {{
+           padding: 1rem 0 !important;
+       }}
+       /* Tarjetas y cajas con padding pensado para desktop */
+       .card-beneficio {{
+           padding: 1.5rem 1.25rem !important;
+       }}
+       .locker-box-clean {{
+           padding: 1.5rem !important;
+       }}
+       [data-testid="stVerticalBlockBorderWrapper"] {{
+           padding: 1.25rem 1.25rem !important;
+       }}
+       /* La barra inferior fija del perfil y su menú usan anchos fijos en px
+          pensados para el ancho de escritorio de la sidebar; en celular la
+          sidebar ocupa casi todo el ancho, así que un ancho fijo se ve
+          chico y descuadrado — lo hacemos relativo al viewport. */
+       .sidebar-bottom-bar {{
+           width: 100% !important;
+       }}
+       .profile-menu {{
+           width: min(85vw, 320px) !important;
+       }}
+   }}
+   @media (max-width: 480px) {{
+       h1 {{
+           font-size: 1.6rem !important;
+       }}
+       .hero-section-inicio, .hero-section-locker {{
+           padding: 2.25rem 1rem !important;
+       }}
+       .uw-slide {{
+           width: 190px !important;
+           height: 140px !important;
+       }}
    }}
    .uw-slide {{
        flex-shrink: 0;
@@ -2173,7 +2268,7 @@ Para cualquier duda sobre este aviso, puedes contactarnos en: **info@uniwebmx.co
 - Si eres **menor de edad**, el uso de Uniwebmx y el tratamiento de tus datos personales requiere el **consentimiento de tu padre, madre o tutor legal**, particularmente para las finalidades secundarias descritas en la Sección 6 (uso de tus datos para entrenar/mejorar a Hugo y para compartir tu información con universidades).
 - Al registrarte como menor de edad, te pediremos el contacto de un padre/tutor. Ese contacto recibe un correo con un enlace de confirmación (doble verificación): mientras el padre/tutor no confirme desde ese enlace, **solo se procesarán tus datos para las finalidades primarias** indispensables para darte el servicio (Sección 5); las finalidades secundarias permanecen desactivadas.
 - Al confirmar, el padre/madre/tutor decide, con casillas independientes, si autoriza cada finalidad secundaria (6.1, 6.2, 6.3) por separado.
-- **El Locker Digital (almacenamiento permanente de documentos) no está disponible para cuentas de menores de edad.** Dado que ahí se guardan documentos especialmente sensibles (acta de nacimiento, CURP, identificación oficial, comprobante de domicilio), decidimos no almacenarlos de forma persistente para usuarios menores de edad. Los alumnos menores de edad sí pueden usar con normalidad a Hugo y el Simulador Estadístico.
+- **El Locker Digital (almacenamiento permanente de documentos) no está disponible para cuentas de menores de edad mientras su padre, madre o tutor no haya confirmado la cuenta mediante el enlace de verificación.** Dado que ahí se guardan documentos especialmente sensibles (acta de nacimiento, CURP, identificación oficial, comprobante de domicilio), decidimos no almacenarlos de forma persistente hasta contar con esa confirmación. Una vez que el padre/madre/tutor confirma la cuenta, el Locker Digital queda disponible con normalidad, igual que para un usuario mayor de edad. Los alumnos menores de edad sí pueden usar con normalidad a Hugo y el Simulador Estadístico desde el registro, sin necesidad de esta confirmación.
 - Un padre, madre o tutor puede en cualquier momento solicitar el acceso, corrección o eliminación de los datos de su hijo/a menor de edad, o revocar el consentimiento otorgado, escribiendo a **info@uniwebmx.com**.
 
 ---
@@ -2188,8 +2283,8 @@ Dependiendo de cómo uses la plataforma, podemos recabar:
 **Datos académicos y de tu proceso de admisión:**
 - Kárdex/certificado de bachillerato, promedio, ensayo o carta de motivos, currículo, cartas de recomendación, universidades y carreras de tu interés.
 
-**Documentos de identidad (Locker Digital — solo cuentas de mayores de edad):**
-- Acta de nacimiento, CURP, identificación oficial, fotografía, comprobante de domicilio. Esta función no está disponible para cuentas registradas como menores de edad (ver Sección 2).
+**Documentos de identidad (Locker Digital):**
+- Acta de nacimiento, CURP, identificación oficial, fotografía, comprobante de domicilio. Si tu cuenta está registrada como menor de edad, esta función queda disponible hasta que tu padre, madre o tutor confirme la cuenta mediante el enlace de verificación (ver Sección 2).
 
 **Datos derivados del uso de la plataforma:**
 - Conversaciones con Hugo (nuestro asesor con inteligencia artificial), resultados del simulador de probabilidades, historial de mensajes.
@@ -2394,7 +2489,7 @@ Al usar la Plataforma, te comprometes a no:
 
 ## 11. Menores de edad
 
-El uso de la Plataforma por menores de edad está sujeto al consentimiento de su padre, madre o tutor legal, conforme se detalla en el Aviso de Privacidad. Ese consentimiento se verifica mediante un enlace de confirmación enviado al correo del padre/madre/tutor; mientras no se confirme, las funciones que impliquen el tratamiento de datos sensibles o su transferencia a terceros permanecen desactivadas. Adicionalmente, el Locker Digital (almacenamiento permanente de documentos de identidad) no está disponible para cuentas registradas como menores de edad.
+El uso de la Plataforma por menores de edad está sujeto al consentimiento de su padre, madre o tutor legal, conforme se detalla en el Aviso de Privacidad. Ese consentimiento se verifica mediante un enlace de confirmación enviado al correo del padre/madre/tutor; mientras no se confirme, las funciones que impliquen el tratamiento de datos sensibles o su transferencia a terceros permanecen desactivadas. Esto incluye al Locker Digital (almacenamiento permanente de documentos de identidad): no está disponible para cuentas registradas como menores de edad hasta que su padre, madre o tutor confirme la cuenta mediante ese enlace; a partir de ese momento, el Locker Digital queda disponible con normalidad.
 
 ---
 
@@ -2772,15 +2867,15 @@ if st.session_state.page == "inicio":
    ]
 
    def _uw_slide_html(titulo, desc, img_url, fallback_bg):
-       # Sin saltos de línea indentados: el Markdown de Streamlit trata el HTML
-       # con indentación (4+ espacios) como un bloque de código y lo muestra
-       # como texto plano en vez de renderizarlo — por eso el carrusel salía
-       # como puras etiquetas visibles en la página en vez de las fotos.
+       # Usamos background-image por CSS (no <img> con onerror) porque
+       # Streamlit puede sanear atributos onXXX aunque unsafe_allow_html
+       # esté activo, dejando visible el ícono de "imagen rota" si la URL
+       # falla. Con background-image, si la foto no carga, simplemente no
+       # se ve nada y queda el degradado de color de abajo, sin ícono raro.
        return (
-           f'<div class="uw-slide" style="background:{fallback_bg};">'
-           f'<img src="{img_url}" loading="lazy" alt="" '
-           f'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" '
-           f'onerror="this.style.display=\'none\';" />'
+           f'<div class="uw-slide" '
+           f'style="background-image:url(\'{img_url}\'), {fallback_bg};'
+           f'background-size:cover;background-position:center;">'
            f'<div class="uw-slide-overlay"></div>'
            f'<div class="uw-slide-text">'
            f'<div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px;">{titulo}</div>'
@@ -2797,6 +2892,7 @@ if st.session_state.page == "inicio":
        f'<div style="text-align:center;font-size:11px;color:#999;margin-top:14px;">pasa el mouse encima para pausar</div>',
        unsafe_allow_html=True,
    )
+
 
 
 
