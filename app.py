@@ -2772,30 +2772,32 @@ if st.session_state.page == "inicio":
    ]
 
    def _uw_slide_html(titulo, desc, img_url, fallback_bg):
-       return f"""
-       <div class="uw-slide" style="background:{fallback_bg};">
-           <img src="{img_url}" loading="lazy" alt=""
-                style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"
-                onerror="this.style.display='none';" />
-           <div class="uw-slide-overlay"></div>
-           <div class="uw-slide-text">
-               <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px;">{titulo}</div>
-               <div style="font-size:12px;color:rgba(255,255,255,0.85);line-height:1.5;">{desc}</div>
-           </div>
-       </div>"""
+       # Sin saltos de línea indentados: el Markdown de Streamlit trata el HTML
+       # con indentación (4+ espacios) como un bloque de código y lo muestra
+       # como texto plano en vez de renderizarlo — por eso el carrusel salía
+       # como puras etiquetas visibles en la página en vez de las fotos.
+       return (
+           f'<div class="uw-slide" style="background:{fallback_bg};">'
+           f'<img src="{img_url}" loading="lazy" alt="" '
+           f'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" '
+           f'onerror="this.style.display=\'none\';" />'
+           f'<div class="uw-slide-overlay"></div>'
+           f'<div class="uw-slide-text">'
+           f'<div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:4px;">{titulo}</div>'
+           f'<div style="font-size:12px;color:rgba(255,255,255,0.85);line-height:1.5;">{desc}</div>'
+           f'</div></div>'
+       )
 
 
 
    _uw_slides_html = "".join(_uw_slide_html(*s) for s in _carrusel_slides) * 2  # x2 para el loop continuo
 
-   st.markdown(f"""
-   <div class="uw-carrusel-viewport">
-       <div class="uw-carrusel-track">
-           {_uw_slides_html}
-       </div>
-   </div>
-   <div style="text-align:center;font-size:11px;color:#999;margin-top:14px;">pasa el mouse encima para pausar</div>
-   """, unsafe_allow_html=True)
+   st.markdown(
+       f'<div class="uw-carrusel-viewport"><div class="uw-carrusel-track">{_uw_slides_html}</div></div>'
+       f'<div style="text-align:center;font-size:11px;color:#999;margin-top:14px;">pasa el mouse encima para pausar</div>',
+       unsafe_allow_html=True,
+   )
+
 
 
    # --- SECCIÓN ADICIONAL: QUIÉNES SOMOS Y MISIÓN ---
