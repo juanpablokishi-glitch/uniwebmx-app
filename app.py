@@ -16,12 +16,11 @@ import resend
 # --- CONFIGURACIÓN DE LA API DE GEMINI ---
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# Modelo usado en TODAS las llamadas a Hugo. "gemini-2.5-flash-lite" es la versión
-# económica/rápida de la familia 2.5 (misma familia que "gemini-2.5-flash", solo que
-# más barata y más rápida; un poco menos de "razonamiento" en tareas complejas).
-# Si en algún momento Hugo se siente "corto" respondiendo, este es el primer valor
-# que hay que subir de vuelta a "gemini-2.5-flash".
-GEMINI_MODEL_LITE = "gemini-2.5-flash-lite"
+# Modelo usado en TODAS las llamadas a Hugo. Volvimos a "gemini-2.5-flash" (no
+# la versión "-lite") porque la lite dio peores respuestas en la práctica.
+# Este es el ÚNICO lugar que hay que tocar si en el futuro quieres probar de
+# nuevo la lite o subir a otro modelo.
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # Cuántos mensajes PREVIOS (usuario + Hugo, ya contados juntos) se le mandan a Gemini
 # como historial de la conversación. Antes se mandaba TODO el historial de la sesión,
@@ -720,6 +719,56 @@ def restaurar_sesion_usuario(username):
 def es_usuario_menor():
     """True si el usuario en sesión está marcado como menor de edad."""
     return bool(st.session_state.get("es_menor_edad_actual", False))
+
+
+def _seccion_reenviar_confirmacion_tutor(_user):
+    """Bloque de UI para reenviar el correo de confirmación al tutor. Vive en
+    'Editar mi perfil' (antes estaba en el Locker, se movió porque ahí es
+    donde el alumno ya está viendo/editando los datos de su cuenta).
+    Genera un token nuevo cada vez (invalida el anterior) y tiene un cooldown
+    de 2 minutos en session_state para evitar spam de correos."""
+    _tutor_email_mostrar = st.session_state.get("tutor_email_actual", "")
+    st.markdown("<div style='max-width:680px;margin:1.2rem 0 0;'>", unsafe_allow_html=True)
+    if _tutor_email_mostrar:
+        st.caption(f"Le enviamos el correo de confirmación a: {_tutor_email_mostrar}")
+    col_reenvio1, col_reenvio2 = st.columns([1, 2])
+    with col_reenvio1:
+        _reenviar_click = st.button("Reenviar correo de confirmación al tutor", key="btn_reenviar_tutor")
+    with col_reenvio2:
+        st.caption("¿Tu tutor no encuentra el correo? Puedes reenviarlo (máximo una vez cada 2 minutos).")
+
+    if _reenviar_click:
+        _ahora_reenvio = datetime.now(timezone.utc)
+        _ultimo_reenvio = st.session_state.get("_ultimo_reenvio_tutor")
+        if _ultimo_reenvio and (_ahora_reenvio - _ultimo_reenvio).total_seconds() < 120:
+            st.warning("Ya reenviamos ese correo hace un momento. Espera un par de minutos antes de volver a intentar.")
+        elif not _tutor_email_mostrar:
+            st.error("No tenemos un correo de tutor registrado en tu cuenta. Escríbenos para corregirlo.")
+        else:
+            try:
+                import secrets as _secrets_reenvio
+                _nuevo_token = _secrets_reenvio.token_urlsafe(32)
+                _nueva_expiry = (_ahora_reenvio + timedelta(days=7)).isoformat()
+                supabase_client.table("usuarios").update({
+                    "tutor_confirm_token": _nuevo_token,
+                    "tutor_confirm_token_expiry": _nueva_expiry,
+                }).eq("username", _user).execute()
+                _confirm_link_reenvio = f"{BASE_URL}/?page=confirmar_tutor&token={_nuevo_token}"
+                _res_email_alumno = supabase_client.table("usuarios").select("email").eq("username", _user).execute()
+                _email_alumno_reenvio = (_res_email_alumno.data[0].get("email", "") if _res_email_alumno.data else "") or ""
+                enviar_correo_confirmacion_tutor(
+                    _tutor_email_mostrar,
+                    st.session_state.get("tutor_nombre_actual", ""),
+                    _user,
+                    _email_alumno_reenvio,
+                    _confirm_link_reenvio,
+                )
+                st.session_state["_ultimo_reenvio_tutor"] = _ahora_reenvio
+                st.success(f"Listo, reenviamos el correo a {_tutor_email_mostrar}. El enlace anterior (si existía) ya no funciona, solo el nuevo.")
+            except Exception as e:
+                _notificar_error_admin("reenviar_correo_confirmacion_tutor", e, extra=f"username={_user}")
+                st.error("No se pudo reenviar el correo en este momento. Intenta de nuevo en un rato.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -1791,6 +1840,30 @@ st.markdown(f"""
        color: #202124;
        white-space: pre-line;
    }}
+
+   /* Color de selección de texto acorde a la paleta (antes se veía el rojo
+      por default del navegador al marcar texto dentro de los globos de Hugo). */
+   .gemini-bubble ::selection, .gemini-text::selection {{
+       background: rgba(74, 93, 50, 0.25) !important;
+       color: #1A1A1A !important;
+   }}
+   .gemini-bubble ::-moz-selection, .gemini-text::-moz-selection {{
+       background: rgba(74, 93, 50, 0.25) !important;
+       color: #1A1A1A !important;
+   }}
+
+   /* La barra de pestañas de st.tabs() usa position: sticky con top:0, pero
+      arriba le restamos 3.5rem al .stApp para compensar el header nativo
+      oculto. Ese desfase hace que la fila de pestañas se vea recortada por
+      arriba al hacer scroll con una pestaña activa. La bajamos ese mismo
+      tanto y le damos fondo sólido para que no se transparente contenido
+      detrás. */
+   [data-testid="stTabs"] [data-baseweb="tab-list"] {{
+       position: sticky !important;
+       top: 3.5rem !important;
+       background: #FFFFFF !important;
+       z-index: 100 !important;
+   }}
   
    div[data-testid="stChatInput"] {{
        background-color: transparent !important;
@@ -1884,7 +1957,12 @@ if es_hub:
 
    with st.sidebar:
        _items_espacio = []
-       if not es_usuario_menor():
+       # Mismo bug que ya arreglamos en la vista del Locker: antes esto solo
+       # revisaba es_usuario_menor(), nunca si el tutor ya había confirmado,
+       # así que el link de Locker desaparecía para siempre para un menor
+       # aunque su tutor ya hubiera confirmado.
+       _menor_bloqueado_sb = es_usuario_menor() and not _tutor_confirmado_fresco(_user)
+       if not _menor_bloqueado_sb:
            _items_espacio.append(_sb_item("Locker Digital", "locker", _icon_locker))
        _items_espacio.append(_sb_item("Consultor IA", "chat", _icon_chat))
        _items_espacio.append(_sb_item("Mi Aplicación", "mi_aplicacion", _icon_app))
@@ -2015,6 +2093,9 @@ if es_hub:
                  <div style="font-size:0.82rem;font-weight:600;color:#1A1A1A;
                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{_user}</div>
                </div>
+               <a href="/?nav=onboarding&t={_sesion_t}" target="_self" style="display:flex;align-items:center;gap:9px;padding:8px 14px;color:#555;font-family:Montserrat,sans-serif;font-size:0.82rem;font-weight:400;text-decoration:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                 </svg>Editar mi perfil
+               </a>
                <a href="/?nav=__logout__" target="_self" style="display:flex;align-items:center;gap:9px;padding:8px 14px;color:#555;font-family:Montserrat,sans-serif;font-size:0.82rem;font-weight:400;text-decoration:none;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
                  </svg>Cerrar sesión
                </a>
@@ -2680,7 +2761,7 @@ def _panel_generar_perfil_universidad_ia(nombre_uni, sub_df):
 
     try:
         model = genai.GenerativeModel(
-            GEMINI_MODEL_LITE,
+            GEMINI_MODEL,
             system_instruction=(
                 "Eres Hugo, analizando datos agregados y anónimos de una plataforma de "
                 "orientación universitaria para describirle a un equipo de admisiones (o al equipo "
@@ -2761,7 +2842,7 @@ def _panel_responder_consultor(pregunta, df, historial):
     ]
     try:
         model = genai.GenerativeModel(
-            GEMINI_MODEL_LITE,
+            GEMINI_MODEL,
             system_instruction=(
                 "Eres Hugo, pero ahora en modo 'consultor de datos' para el equipo interno de "
                 "Uniwebmx o para una universidad socia. Te dan estadísticas agregadas y anónimas "
@@ -3472,6 +3553,17 @@ elif st.session_state.page == "onboarding":
             unsafe_allow_html=True,
         )
 
+        if es_usuario_menor() and not _tutor_confirmado_fresco(_user):
+            st.markdown(
+                "<div style='background:#FAEEDA;border-radius:12px;padding:16px 20px;margin-bottom:1.5rem;'>"
+                "<p style='font-size:0.85rem;color:#5F4B1E;line-height:1.6;margin:0;'>"
+                "Por ser menor de edad, tu Locker Digital, Mi Aplicación y algunas funciones adicionales se "
+                "desbloquean en cuanto tu padre, madre o tutor legal confirme desde el correo que le enviamos."
+                "</p></div>",
+                unsafe_allow_html=True,
+            )
+            _seccion_reenviar_confirmacion_tutor(_user)
+
         # Verificar si el usuario ya tiene email guardado
         _res_onb_email = supabase_client.table("usuarios").select("email").eq("username", _user).execute()
         _email_guardado = (_res_onb_email.data[0].get("email") or "") if _res_onb_email.data else ""
@@ -3593,53 +3685,11 @@ elif st.session_state.page == "locker":
            "comprobante) solo hasta que tu padre, madre o tutor legal confirme por correo. "
            "<strong>En cuanto confirme, el Locker se desbloquea solo</strong> — no necesitas hacer nada más "
            "que cerrar sesión y volver a entrar. Mientras tanto puedes seguir usando a Hugo y el Simulador "
-           "con normalidad."
+           "con normalidad. ¿Tu tutor no encuentra el correo? Puedes reenviarlo desde "
+           "<strong>Editar mi perfil</strong> (en el menú de tu cuenta, abajo en la barra lateral)."
            "</p></div>",
            unsafe_allow_html=True,
        )
-
-       st.markdown("<div style='max-width:680px;margin:1.2rem auto 0;'>", unsafe_allow_html=True)
-       _tutor_email_mostrar = st.session_state.get("tutor_email_actual", "")
-       if _tutor_email_mostrar:
-           st.caption(f"Le enviamos el correo de confirmación a: {_tutor_email_mostrar}")
-       col_reenvio1, col_reenvio2 = st.columns([1, 2])
-       with col_reenvio1:
-           _reenviar_click = st.button("Reenviar correo de confirmación al tutor", key="btn_reenviar_tutor")
-       with col_reenvio2:
-           st.caption("¿Tu tutor no encuentra el correo? Puedes reenviarlo (máximo una vez cada 2 minutos).")
-
-       if _reenviar_click:
-           _ahora_reenvio = datetime.now(timezone.utc)
-           _ultimo_reenvio = st.session_state.get("_ultimo_reenvio_tutor")
-           if _ultimo_reenvio and (_ahora_reenvio - _ultimo_reenvio).total_seconds() < 120:
-               st.warning("Ya reenviamos ese correo hace un momento. Espera un par de minutos antes de volver a intentar.")
-           elif not _tutor_email_mostrar:
-               st.error("No tenemos un correo de tutor registrado en tu cuenta. Escríbenos para corregirlo.")
-           else:
-               try:
-                   import secrets as _secrets_reenvio
-                   _nuevo_token = _secrets_reenvio.token_urlsafe(32)
-                   _nueva_expiry = (_ahora_reenvio + timedelta(days=7)).isoformat()
-                   supabase_client.table("usuarios").update({
-                       "tutor_confirm_token": _nuevo_token,
-                       "tutor_confirm_token_expiry": _nueva_expiry,
-                   }).eq("username", _user).execute()
-                   _confirm_link_reenvio = f"{BASE_URL}/?page=confirmar_tutor&token={_nuevo_token}"
-                   _res_email_alumno = supabase_client.table("usuarios").select("email").eq("username", _user).execute()
-                   _email_alumno_reenvio = (_res_email_alumno.data[0].get("email", "") if _res_email_alumno.data else "") or ""
-                   enviar_correo_confirmacion_tutor(
-                       _tutor_email_mostrar,
-                       st.session_state.get("tutor_nombre_actual", ""),
-                       _user,
-                       _email_alumno_reenvio,
-                       _confirm_link_reenvio,
-                   )
-                   st.session_state["_ultimo_reenvio_tutor"] = _ahora_reenvio
-                   st.success(f"Listo, reenviamos el correo a {_tutor_email_mostrar}. El enlace anterior (si existía) ya no funciona, solo el nuevo.")
-               except Exception as e:
-                   _notificar_error_admin("reenviar_correo_confirmacion_tutor", e, extra=f"username={_user}")
-                   st.error("No se pudo reenviar el correo en este momento. Intenta de nuevo en un rato.")
-       st.markdown("</div>", unsafe_allow_html=True)
    else:
     st.markdown("""
     <div class="hero-section-locker">
@@ -3741,7 +3791,7 @@ elif st.session_state.page == "locker":
 elif st.session_state.page == "mi_aplicacion":
    _user = st.session_state.get("user")
 
-   if es_usuario_menor():
+   if es_usuario_menor() and not _tutor_confirmado_fresco(_user):
        st.markdown("""
        <div class="hero-section-locker">
            <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Mi Aplicación</h1>
@@ -3749,11 +3799,11 @@ elif st.session_state.page == "mi_aplicacion":
        """, unsafe_allow_html=True)
        st.markdown(
            "<div style='max-width:680px;margin:0 auto;background:#FAEEDA;border-radius:12px;padding:28px 32px;'>"
-           "<h3 style='margin-top:0;color:#5F4B1E;font-size:1.15rem;'>Esta sección no está disponible para tu cuenta</h3>"
+           "<h3 style='margin-top:0;color:#5F4B1E;font-size:1.15rem;'>Esta sección no está disponible todavía</h3>"
            "<p style='font-size:0.92rem;color:#5F4B1E;line-height:1.7;margin-bottom:0;'>"
-           "Las carpetas por universidad se arman con los documentos de tu Locker Digital, que no está disponible "
-           "para cuentas de menores de edad. Puedes seguir usando a Hugo para resolver dudas sobre tu proceso de "
-           "admisión."
+           "Las carpetas por universidad se arman con los documentos de tu Locker Digital, que se desbloquea en "
+           "cuanto tu padre, madre o tutor legal confirme por correo. Mientras tanto, puedes seguir usando a Hugo "
+           "para resolver dudas sobre tu proceso de admisión."
            "</p></div>",
            unsafe_allow_html=True,
        )
@@ -4103,7 +4153,7 @@ elif st.session_state.page == "chat":
                         historial_gemini.append({"role": rol_gemini, "parts": [msg["content"]]})
 
                     model = genai.GenerativeModel(
-                        GEMINI_MODEL_LITE,
+                        GEMINI_MODEL,
                         system_instruction=(
                             "Eres Hugo, un consultor experto en admisiones universitarias en México. "
                             "Usa el perfil del alumno (nombre, edad, carreras de interés, universidades de "
@@ -4229,7 +4279,7 @@ elif st.session_state.page == "simulador":
                             f"La justificación debe ser de máximo 15 palabras.\n\n"
                             f"KÁRDEX: {contenido_kardex}\n\nENSAYO: {contenido_ensayo}"
                         )
-                        model_ajuste = genai.GenerativeModel(GEMINI_MODEL_LITE)
+                        model_ajuste = genai.GenerativeModel(GEMINI_MODEL)
                         respuesta_ajuste = model_ajuste.generate_content(prompt_ajuste)
                         texto_limpio = respuesta_ajuste.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
                         datos_ia = json.loads(texto_limpio)
