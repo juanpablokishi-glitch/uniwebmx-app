@@ -16,6 +16,20 @@ import resend
 # --- CONFIGURACIÓN DE LA API DE GEMINI ---
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
+# Modelo usado en TODAS las llamadas a Hugo. "gemini-2.5-flash-lite" es la versión
+# económica/rápida de la familia 2.5 (misma familia que "gemini-2.5-flash", solo que
+# más barata y más rápida; un poco menos de "razonamiento" en tareas complejas).
+# Si en algún momento Hugo se siente "corto" respondiendo, este es el primer valor
+# que hay que subir de vuelta a "gemini-2.5-flash".
+GEMINI_MODEL_LITE = "gemini-2.5-flash-lite"
+
+# Cuántos mensajes PREVIOS (usuario + Hugo, ya contados juntos) se le mandan a Gemini
+# como historial de la conversación. Antes se mandaba TODO el historial de la sesión,
+# lo que hace cada consulta más cara y lenta mientras más larga es la charla. 12
+# mensajes ≈ las últimas 6 idas y vueltas, suficiente para que Hugo no pierda el hilo
+# sin arrastrar la conversación completa en cada request.
+MAX_HISTORIAL_GEMINI = 12
+
 # --- CLIENTE SUPABASE ---
 @st.cache_resource
 def get_supabase() -> Client:
@@ -2666,7 +2680,7 @@ def _panel_generar_perfil_universidad_ia(nombre_uni, sub_df):
 
     try:
         model = genai.GenerativeModel(
-            "gemini-2.5-flash",
+            GEMINI_MODEL_LITE,
             system_instruction=(
                 "Eres Hugo, analizando datos agregados y anónimos de una plataforma de "
                 "orientación universitaria para describirle a un equipo de admisiones (o al equipo "
@@ -2743,11 +2757,11 @@ def _panel_responder_consultor(pregunta, df, historial):
     )
     historial_gemini = [
         {"role": ("user" if m["role"] == "user" else "model"), "parts": [m["content"]]}
-        for m in historial
+        for m in historial[-MAX_HISTORIAL_GEMINI:]
     ]
     try:
         model = genai.GenerativeModel(
-            "gemini-2.5-flash",
+            GEMINI_MODEL_LITE,
             system_instruction=(
                 "Eres Hugo, pero ahora en modo 'consultor de datos' para el equipo interno de "
                 "Uniwebmx o para una universidad socia. Te dan estadísticas agregadas y anónimas "
@@ -3999,6 +4013,29 @@ elif st.session_state.page == "chat":
                     if contexto_unis:
                         partes_contexto.append(f"--- BASE DE CONOCIMIENTO VERIFICADA DE UNIVERSIDADES ---\n{contexto_unis}")
 
+                    # --- RESULTADOS YA CALCULADOS DEL SIMULADOR ---
+                    # Antes esto NO se mandaba al chat: si el alumno ya había usado el
+                    # Simulador Estadístico y luego le preguntaba a Hugo por sus
+                    # probabilidades, Hugo no tenía ese dato en el contexto y no podía
+                    # responder con las cifras reales (aunque ya existieran).
+                    resultados_sim_actual = st.session_state.get("resultados_simulador") or {}
+                    if resultados_sim_actual:
+                        lineas_prob = []
+                        for _uni_sim, _r_sim in resultados_sim_actual.items():
+                            lineas_prob.append(
+                                f"- {_uni_sim}: {_r_sim.get('prob_final', 'sin dato')}% "
+                                f"(confianza del dato base: {_r_sim.get('confianza', 'sin dato')})"
+                            )
+                        partes_contexto.append(
+                            "--- PROBABILIDADES YA CALCULADAS EN EL SIMULADOR ---\n"
+                            + "\n".join(lineas_prob)
+                            + "\n\nSi el alumno pregunta por sus probabilidades y aquí ya hay un "
+                            "resultado para esa universidad, dáselo directamente citando el "
+                            "porcentaje. No le pidas que repita datos de su perfil que ya tienes. "
+                            "Si pregunta por una universidad que no está en esta lista, dile que "
+                            "no la ha simulado todavía y sugiérele ir al Simulador Estadístico."
+                        )
+
                     info_doc = ""
                     if partes_contexto:
                         info_doc = "\n\n[CONTEXTO DEL ALUMNO]\n" + "\n\n".join(partes_contexto)
@@ -4007,14 +4044,14 @@ elif st.session_state.page == "chat":
                     # Tomamos todo el historial previo (sin contar el mensaje que acabamos
                     # de agregar, que se manda aparte con send_message) y lo convertimos
                     # al formato que espera la API de Gemini.
-                    historial_previo = st.session_state.historial_chat[:-1]
+                    historial_previo = st.session_state.historial_chat[:-1][-MAX_HISTORIAL_GEMINI:]
                     historial_gemini = []
                     for msg in historial_previo:
                         rol_gemini = "user" if msg["role"] == "user" else "model"
                         historial_gemini.append({"role": rol_gemini, "parts": [msg["content"]]})
 
                     model = genai.GenerativeModel(
-                        "gemini-2.5-flash",
+                        GEMINI_MODEL_LITE,
                         system_instruction=(
                             "Eres Hugo, un consultor experto en admisiones universitarias en México. "
                             "Usa el perfil del alumno (nombre, edad, carreras de interés, universidades de "
@@ -4033,7 +4070,10 @@ elif st.session_state.page == "chat":
                             "junto a una universidad en la base de conocimiento.\n"
                             "4. Si te preguntan sobre una universidad que no está en tu base de "
                             "conocimiento, dilo explícitamente y ofrece ayudar con lo que sí tienes "
-                            "verificado, en vez de inventar cifras.\n\n"
+                            "verificado, en vez de inventar cifras.\n"
+                            "5. Si el contexto trae 'PROBABILIDADES YA CALCULADAS EN EL SIMULADOR', "
+                            "úsalas tal cual cuando te pregunten por probabilidades de admisión — no "
+                            "pidas de nuevo el perfil del alumno ni inventes un número distinto.\n\n"
                             "No uses emojis en tus respuestas."
                         ),
                     )
@@ -4137,7 +4177,7 @@ elif st.session_state.page == "simulador":
                             f"La justificación debe ser de máximo 15 palabras.\n\n"
                             f"KÁRDEX: {contenido_kardex}\n\nENSAYO: {contenido_ensayo}"
                         )
-                        model_ajuste = genai.GenerativeModel("gemini-2.5-flash")
+                        model_ajuste = genai.GenerativeModel(GEMINI_MODEL_LITE)
                         respuesta_ajuste = model_ajuste.generate_content(prompt_ajuste)
                         texto_limpio = respuesta_ajuste.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
                         datos_ia = json.loads(texto_limpio)
