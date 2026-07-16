@@ -3571,7 +3571,15 @@ elif st.session_state.page == "onboarding":
 elif st.session_state.page == "locker":
    _user = st.session_state.get("user")
 
-   if es_usuario_menor():
+   # BUG QUE ARREGLAMOS: esta vista bloqueaba el Locker con solo checar
+   # es_usuario_menor(), sin importar si el tutor ya había confirmado. Por eso
+   # el Locker se quedaba "bloqueado para siempre" para un menor aunque su
+   # tutor ya hubiera dado clic en el correo de confirmación: guardar_datos_usuario()
+   # sí revisaba tutor_confirmado (con _tutor_confirmado_fresco), pero esta vista no.
+   # Ahora usamos el mismo criterio en los dos lugares.
+   _menor_sin_confirmar = es_usuario_menor() and not _tutor_confirmado_fresco(_user)
+
+   if _menor_sin_confirmar:
        st.markdown("""
        <div class="hero-section-locker">
            <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Tu Locker Digital</h1>
@@ -3579,15 +3587,59 @@ elif st.session_state.page == "locker":
        """, unsafe_allow_html=True)
        st.markdown(
            "<div style='max-width:680px;margin:0 auto;background:#FAEEDA;border-radius:12px;padding:28px 32px;'>"
-           "<h3 style='margin-top:0;color:#5F4B1E;font-size:1.15rem;'>El Locker Digital no está disponible para tu cuenta</h3>"
+           "<h3 style='margin-top:0;color:#5F4B1E;font-size:1.15rem;'>El Locker Digital no está disponible todavía</h3>"
            "<p style='font-size:0.92rem;color:#5F4B1E;line-height:1.7;margin-bottom:0;'>"
-           "Por ser menor de edad, y dado que el Locker guarda documentos sensibles como tu acta de nacimiento, "
-           "CURP, identificación oficial y comprobante de domicilio, Uniwebmx <strong>no almacena de forma permanente "
-           "esos documentos</strong> en tu cuenta. Puedes seguir usando a Hugo y el Simulador con normalidad — solo el "
-           "almacenamiento persistente de documentos está desactivado para proteger tu información."
+           "Por ser menor de edad, el Locker guarda documentos sensibles (acta, CURP, identificación, "
+           "comprobante) solo hasta que tu padre, madre o tutor legal confirme por correo. "
+           "<strong>En cuanto confirme, el Locker se desbloquea solo</strong> — no necesitas hacer nada más "
+           "que cerrar sesión y volver a entrar. Mientras tanto puedes seguir usando a Hugo y el Simulador "
+           "con normalidad."
            "</p></div>",
            unsafe_allow_html=True,
        )
+
+       st.markdown("<div style='max-width:680px;margin:1.2rem auto 0;'>", unsafe_allow_html=True)
+       _tutor_email_mostrar = st.session_state.get("tutor_email_actual", "")
+       if _tutor_email_mostrar:
+           st.caption(f"Le enviamos el correo de confirmación a: {_tutor_email_mostrar}")
+       col_reenvio1, col_reenvio2 = st.columns([1, 2])
+       with col_reenvio1:
+           _reenviar_click = st.button("Reenviar correo de confirmación al tutor", key="btn_reenviar_tutor")
+       with col_reenvio2:
+           st.caption("¿Tu tutor no encuentra el correo? Puedes reenviarlo (máximo una vez cada 2 minutos).")
+
+       if _reenviar_click:
+           _ahora_reenvio = datetime.now(timezone.utc)
+           _ultimo_reenvio = st.session_state.get("_ultimo_reenvio_tutor")
+           if _ultimo_reenvio and (_ahora_reenvio - _ultimo_reenvio).total_seconds() < 120:
+               st.warning("Ya reenviamos ese correo hace un momento. Espera un par de minutos antes de volver a intentar.")
+           elif not _tutor_email_mostrar:
+               st.error("No tenemos un correo de tutor registrado en tu cuenta. Escríbenos para corregirlo.")
+           else:
+               try:
+                   import secrets as _secrets_reenvio
+                   _nuevo_token = _secrets_reenvio.token_urlsafe(32)
+                   _nueva_expiry = (_ahora_reenvio + timedelta(days=7)).isoformat()
+                   supabase_client.table("usuarios").update({
+                       "tutor_confirm_token": _nuevo_token,
+                       "tutor_confirm_token_expiry": _nueva_expiry,
+                   }).eq("username", _user).execute()
+                   _confirm_link_reenvio = f"{BASE_URL}/?page=confirmar_tutor&token={_nuevo_token}"
+                   _res_email_alumno = supabase_client.table("usuarios").select("email").eq("username", _user).execute()
+                   _email_alumno_reenvio = (_res_email_alumno.data[0].get("email", "") if _res_email_alumno.data else "") or ""
+                   enviar_correo_confirmacion_tutor(
+                       _tutor_email_mostrar,
+                       st.session_state.get("tutor_nombre_actual", ""),
+                       _user,
+                       _email_alumno_reenvio,
+                       _confirm_link_reenvio,
+                   )
+                   st.session_state["_ultimo_reenvio_tutor"] = _ahora_reenvio
+                   st.success(f"Listo, reenviamos el correo a {_tutor_email_mostrar}. El enlace anterior (si existía) ya no funciona, solo el nuevo.")
+               except Exception as e:
+                   _notificar_error_admin("reenviar_correo_confirmacion_tutor", e, extra=f"username={_user}")
+                   st.error("No se pudo reenviar el correo en este momento. Intenta de nuevo en un rato.")
+       st.markdown("</div>", unsafe_allow_html=True)
    else:
     st.markdown("""
     <div class="hero-section-locker">
