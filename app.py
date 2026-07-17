@@ -1328,9 +1328,12 @@ st.markdown(f"""
        visibility: hidden !important;
        display: none !important;
    }}
-   /* Al quitar el header, recuperamos el espacio que dejaba arriba */
+   /* Al quitar el header, recuperamos el espacio que dejaba arriba.
+      OJO: -3.5rem tapaba la parte superior de la barra de navegación
+      propia (logo, Ranking, Blog, Comunidad). Se redujo el jalón hacia
+      arriba para que la barra completa quede visible debajo del navegador. */
    .stApp {{
-       margin-top: -3.5rem !important;
+       margin-top: -1rem !important;
    }}
    [data-testid="stAppViewContainer"] {{
        padding-top: 0 !important;
