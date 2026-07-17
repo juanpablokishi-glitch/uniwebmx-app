@@ -1768,6 +1768,22 @@ st.markdown(f"""
        box-shadow: 0 0 0 1px rgba(74, 93, 50, 0.35) !important;
        outline: none !important;
    }}
+
+   /* Pista roja de "Press Enter to submit form" dentro de st.form:
+      este rojo viene fijo de Streamlit (no del primaryColor del tema),
+      por eso seguía apareciendo aunque el resto ya fuera verde. */
+   [data-testid="stTextInputRootElement"],
+   [data-testid="stForm"] [data-baseweb="base-input"],
+   [data-testid="stForm"] [data-baseweb="input"] {{
+       border-color: #777777 !important;
+   }}
+   [data-testid="stTextInputRootElement"]:focus-within,
+   [data-testid="stForm"] [data-baseweb="base-input"]:focus-within,
+   [data-testid="stForm"] [data-baseweb="input"]:focus-within {{
+       border-color: #4A5D32 !important;
+       box-shadow: 0 0 0 1px rgba(74, 93, 50, 0.35) !important;
+       outline: none !important;
+   }}
    /* Botones: anillo de foco por default también hereda el rojo del theme */
    button:focus, button:focus-visible,
    .stButton button:focus, .stButton button:focus-visible,
