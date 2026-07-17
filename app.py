@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import base64
 import os
+import io
+import zipfile
 import google.generativeai as genai
 import json
 import bcrypt
@@ -900,6 +902,27 @@ def mostrar_visor_documento(username, tipo_documento, titulo_boton="Ver / Descar
             st.image(datos_bytes)
 
 
+def generar_zip_carpeta(username, tipos_documento):
+    """Arma un .zip en memoria con los archivos originales (kárdex, acta, etc.)
+    que el usuario ya tiene subidos en su Locker Digital, para una lista de
+    tipos de documento (normalmente los que pide una universidad específica).
+    Los documentos que aún no se han subido simplemente se omiten del zip.
+    Devuelve (bytes_del_zip, cuántos_documentos_incluidos)."""
+    buffer = io.BytesIO()
+    incluidos = 0
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for tipo_documento in tipos_documento:
+            datos_bytes, nombre_original = obtener_archivo_original(username, tipo_documento)
+            if datos_bytes and nombre_original:
+                # Prefijo con el tipo de documento para que no se pisen nombres
+                # repetidos (ej. dos archivos llamados "escaneo.pdf").
+                nombre_en_zip = f"{tipo_documento}__{nombre_original}"
+                zf.writestr(nombre_en_zip, datos_bytes)
+                incluidos += 1
+    buffer.seek(0)
+    return buffer.getvalue(), incluidos
+
+
 # =================================================================
 # DATOS DE REFERENCIA POR UNIVERSIDAD (Simulador Estadístico)
 # =================================================================
@@ -1790,19 +1813,25 @@ st.markdown(f"""
        border-radius: 8px;
    }}
   
-   /* --- CHAT DE HUGO: contenedor tipo tarjeta con marco (no de lado a lado) --- */
+   /* --- CHAT DE HUGO: ya no lleva marco/tarjeta, los mensajes fluyen
+      directo sobre el fondo de la página (se quitó el borde y la sombra
+      gris que lo rodeaba). Se conserva el ancho máximo y el padding
+      lateral solo para centrar la conversación en pantallas anchas. */
    .gemini-chat-container {{
        max-width: 760px;
        margin: 0 auto 1.25rem;
-       padding: 1.5rem 1.75rem;
-       border: 1px solid #EAEAEA;
-       border-radius: 16px;
-       background: #FFFFFF;
-       box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+       padding: 0.5rem 0.25rem;
+       border: none;
+       background: transparent;
+       box-shadow: none;
+       outline: none !important;
+       -webkit-tap-highlight-color: transparent;
    }}
    .gemini-row {{
        display: flex;
        margin-bottom: 1.1rem;
+       outline: none !important;
+       -webkit-tap-highlight-color: transparent;
    }}
    .gemini-row.gemini-row-user {{
        justify-content: flex-end;
@@ -1812,6 +1841,8 @@ st.markdown(f"""
    }}
    .gemini-bubble {{
        max-width: 80%;
+       outline: none !important;
+       -webkit-tap-highlight-color: transparent;
    }}
    .gemini-bubble-user {{
        background: #EEF1E9;
@@ -1839,17 +1870,32 @@ st.markdown(f"""
        line-height: 1.45;
        color: #202124;
        white-space: pre-line;
+       outline: none !important;
+       -webkit-tap-highlight-color: transparent;
    }}
 
-   /* Color de selección de texto acorde a la paleta (antes se veía el rojo
-      por default del navegador al marcar texto dentro de los globos de Hugo). */
-   .gemini-bubble ::selection, .gemini-text::selection {{
+   /* Color de selección de texto acorde a la paleta (antes se veía el
+      recuadro/resaltado rojo por default del navegador al marcar texto
+      dentro de los globos de Hugo). Se aplica a todo lo que vive dentro
+      de .gemini-chat-container, no solo a la burbuja y al texto, para que
+      ningún hijo se quede con el color default del navegador. */
+   .gemini-chat-container ::selection {{
        background: rgba(74, 93, 50, 0.25) !important;
        color: #1A1A1A !important;
    }}
-   .gemini-bubble ::-moz-selection, .gemini-text::-moz-selection {{
+   .gemini-chat-container ::-moz-selection {{
        background: rgba(74, 93, 50, 0.25) !important;
        color: #1A1A1A !important;
+   }}
+   /* Quita cualquier contorno de foco/click (el "recuadro rojo") en toda
+      la conversación, tanto en desktop (:focus) como en móvil (tap). */
+   .gemini-chat-container, .gemini-chat-container * {{
+       outline: none !important;
+       -webkit-tap-highlight-color: transparent !important;
+   }}
+   .gemini-chat-container *:focus, .gemini-chat-container *:focus-visible, .gemini-chat-container *:active {{
+       outline: none !important;
+       box-shadow: none !important;
    }}
 
    /* La barra de pestañas de st.tabs() usa position: sticky con top:0, pero
@@ -3877,6 +3923,19 @@ elif st.session_state.page == "mi_aplicacion":
                 if completos == len(docs_requeridos) and docs_requeridos:
                     st.success("¡Carpeta completa! Ya tienes todos los documentos del Locker listos para esta universidad.")
 
+                # --- Descargar la carpeta completa como ZIP ---
+                # Solo se incluyen en el zip los documentos que ya están subidos;
+                # los que faltan simplemente no aparecen (no truena el botón).
+                if completos > 0:
+                    zip_bytes, num_incluidos = generar_zip_carpeta(_user, docs_requeridos)
+                    st.download_button(
+                        f"⬇ Descargar carpeta ZIP ({num_incluidos}/{len(docs_requeridos)} documentos)",
+                        data=zip_bytes,
+                        file_name=f"Uniwebmx_{_nombre_seguro(nombre_uni)}.zip",
+                        mime="application/zip",
+                        key=f"zip_{_nombre_seguro(nombre_uni)}",
+                    )
+
         st.markdown("<div style='margin-bottom:2rem;'></div>", unsafe_allow_html=True)
         st.caption("Tip: las carpetas se actualizan solas en cuanto subas o reemplaces un documento en tu Locker Digital.")
 
@@ -4040,34 +4099,44 @@ elif st.session_state.page == "chat":
 
     LIMITE_DIARIO = LIMITE_HUGO_DIARIO
 
-    st.markdown('<div class="gemini-chat-container">', unsafe_allow_html=True)
-  
     if "historial_chat" not in st.session_state:
         st.session_state.historial_chat = [
             {"role": "assistant", "content": "¡Hola! Soy Hugo, tu consultor de admisión. ¿En qué puedo ayudarte hoy?"}
         ]
-  
+
+    # IMPORTANTE: todo el historial se arma como UN solo string HTML y se
+    # renderiza con UNA sola llamada a st.markdown. Antes el <div class=
+    # "gemini-chat-container"> se abría en una llamada y se cerraba en otra,
+    # con cada mensaje renderizado en llamadas independientes en medio —
+    # cada llamada a st.markdown genera su propio bloque en el DOM, así que
+    # ese div "contenedor" nunca envolvía nada: se pintaba solo (vacío) como
+    # una caja en blanco arriba de la conversación, que es la caja que se
+    # veía en la parte superior del chat.
+    _filas_chat = []
     for msg in st.session_state.historial_chat:
         if msg["role"] == "user":
-            st.markdown(f"""
+            _filas_chat.append(f"""
             <div class="gemini-row gemini-row-user">
                 <div class="gemini-bubble gemini-bubble-user">
                     <div class="gemini-user-label">Tú</div>
                     <div class="gemini-text">{msg["content"]}</div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+            """)
         else:
-            st.markdown(f"""
+            _filas_chat.append(f"""
             <div class="gemini-row gemini-row-hugo">
                 <div class="gemini-bubble gemini-bubble-hugo">
                     <div class="gemini-hugo-label">Hugo</div>
                     <div class="gemini-text">{msg["content"]}</div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
-          
-    st.markdown('</div>', unsafe_allow_html=True)
+            """)
+
+    st.markdown(
+        f'<div class="gemini-chat-container">{"".join(_filas_chat)}</div>',
+        unsafe_allow_html=True,
+    )
   
     prompt_chat = st.chat_input("Pregúntale a Hugo...", key="chat_gemini_input_real")
     
