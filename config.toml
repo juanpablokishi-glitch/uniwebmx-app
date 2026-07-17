@@ -1,0 +1,15 @@
+[theme]
+# Color de acento para botones activos, links y barras de carga (Azul Eléctrico)
+primaryColor = "#0052FF"
+
+# Color de fondo de la pantalla principal (Blanco total para espacio negativo)
+backgroundColor = "#FFFFFF"
+
+# Color del fondo del menú lateral (Gris arquitectónico muy sutil)
+secondaryBackgroundColor = "#F8F9FA"
+
+# Color del texto principal (Negro carbón para alta legibilidad)
+textColor = "#111111"
+
+# Tipografía geométrica y moderna sin patines
+font = "sans serif"
