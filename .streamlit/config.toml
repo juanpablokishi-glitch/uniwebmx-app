@@ -1,1 +1,19 @@
+[theme]
+# Este archivo es la causa raíz del recuadro/borde rojo que aparecía al dar
+# clic o seleccionar en los inputs (login, registro, el chat de Hugo, etc.):
+# Streamlit usa un color "primaryColor" para los estados de foco/selección de
+# TODOS los widgets (text_input, chat_input, botones, checkboxes, sliders...),
+# y si no se define, su default es un rojo/coral (#FF4B4B). Como app.py nunca
+# definía este archivo, ese rojo por defecto se filtraba en cualquier input de
+# cualquier página, no solo en el chat.
+#
+# Con esto, todo el foco/selección de la app usa el verde de tu marca en vez
+# del rojo default. IMPORTANTE: esta carpeta ".streamlit" debe vivir en la
+# raíz de tu proyecto, al mismo nivel que app.py (no dentro de otra carpeta),
+# para que Streamlit la detecte automáticamente al arrancar.
 
+primaryColor = "#4A5D32"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F3"
+textColor = "#1A1A1A"
+font = "sans serif"
