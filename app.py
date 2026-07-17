@@ -1736,6 +1736,45 @@ st.markdown(f"""
        font-size: 1.1rem !important;
        margin-bottom: 8px !important;
    }}
+
+   /* --- QUITAR EL ROJO DEFAULT DE STREAMLIT (primaryColor #FF4B4B) DEL
+      FOCO/SELECCIÓN EN TODOS LOS INPUTS DE TODA LA APP (login, registro,
+      chat de Hugo, formularios, etc.) ---
+      Streamlit usa el "primaryColor" del theme para el anillo/sombra de foco
+      de sus widgets (BaseWeb por debajo). Si el proyecto no trae un
+      .streamlit/config.toml con un primaryColor propio, ese color por
+      default es un rojo/coral, y aparece como un recuadro rojo alrededor de
+      cualquier input, textarea o botón al darles clic o seleccionarlos —
+      esto es justo el .streamlit/config.toml que se agregó junto con este
+      archivo. Estas reglas son un respaldo por si algún componente no toma
+      el theme (o hay una versión vieja cacheada del deploy). */
+   div[data-baseweb="base-input"],
+   div[data-baseweb="input"],
+   div[data-baseweb="textarea"],
+   div[data-baseweb="select"] > div,
+   div[data-testid="stChatInput"],
+   div[data-testid="stChatInput"] textarea,
+   .stTextInput div[data-baseweb="input"],
+   .stTextArea textarea {{
+       box-shadow: none !important;
+   }}
+   div[data-baseweb="base-input"]:focus-within,
+   div[data-baseweb="input"]:focus-within,
+   div[data-baseweb="textarea"]:focus-within,
+   div[data-testid="stChatInput"]:focus-within,
+   div[data-testid="stChatInput"] textarea:focus,
+   .stTextArea textarea:focus {{
+       border-color: #4A5D32 !important;
+       box-shadow: 0 0 0 1px rgba(74, 93, 50, 0.35) !important;
+       outline: none !important;
+   }}
+   /* Botones: anillo de foco por default también hereda el rojo del theme */
+   button:focus, button:focus-visible,
+   .stButton button:focus, .stButton button:focus-visible,
+   .stFormSubmitButton button:focus, .stFormSubmitButton button:focus-visible {{
+       outline: none !important;
+       box-shadow: 0 0 0 2px rgba(74, 93, 50, 0.35) !important;
+   }}
   
    /* Quitar el botón feo default de Streamlit en todas partes */
    .stButton > button {{
@@ -4105,33 +4144,35 @@ elif st.session_state.page == "chat":
         ]
 
     # IMPORTANTE: todo el historial se arma como UN solo string HTML y se
-    # renderiza con UNA sola llamada a st.markdown. Antes el <div class=
-    # "gemini-chat-container"> se abría en una llamada y se cerraba en otra,
-    # con cada mensaje renderizado en llamadas independientes en medio —
-    # cada llamada a st.markdown genera su propio bloque en el DOM, así que
-    # ese div "contenedor" nunca envolvía nada: se pintaba solo (vacío) como
-    # una caja en blanco arriba de la conversación, que es la caja que se
-    # veía en la parte superior del chat.
+    # renderiza con UNA sola llamada a st.markdown, EN UNA SOLA LÍNEA por
+    # entrada (sin saltos de línea ni indentación). Dos razones:
+    # 1) Antes el <div class="gemini-chat-container"> se abría en una
+    #    llamada y se cerraba en otra, con cada mensaje en medio en llamadas
+    #    independientes — cada st.markdown genera su propio bloque en el DOM,
+    #    así que ese div "contenedor" nunca envolvía nada: se pintaba vacío
+    #    como una caja en blanco arriba de la conversación.
+    # 2) Un texto indentado con 4+ espacios y precedido de línea en blanco
+    #    es justo la sintaxis que Markdown interpreta como bloque de código
+    #    literal — por eso al unir los mensajes con saltos e indentación se
+    #    veían los <div> crudos como texto en vez de renderizarse como HTML.
     _filas_chat = []
     for msg in st.session_state.historial_chat:
         if msg["role"] == "user":
-            _filas_chat.append(f"""
-            <div class="gemini-row gemini-row-user">
-                <div class="gemini-bubble gemini-bubble-user">
-                    <div class="gemini-user-label">Tú</div>
-                    <div class="gemini-text">{msg["content"]}</div>
-                </div>
-            </div>
-            """)
+            _filas_chat.append(
+                '<div class="gemini-row gemini-row-user">'
+                '<div class="gemini-bubble gemini-bubble-user">'
+                '<div class="gemini-user-label">Tú</div>'
+                f'<div class="gemini-text">{msg["content"]}</div>'
+                '</div></div>'
+            )
         else:
-            _filas_chat.append(f"""
-            <div class="gemini-row gemini-row-hugo">
-                <div class="gemini-bubble gemini-bubble-hugo">
-                    <div class="gemini-hugo-label">Hugo</div>
-                    <div class="gemini-text">{msg["content"]}</div>
-                </div>
-            </div>
-            """)
+            _filas_chat.append(
+                '<div class="gemini-row gemini-row-hugo">'
+                '<div class="gemini-bubble gemini-bubble-hugo">'
+                '<div class="gemini-hugo-label">Hugo</div>'
+                f'<div class="gemini-text">{msg["content"]}</div>'
+                '</div></div>'
+            )
 
     st.markdown(
         f'<div class="gemini-chat-container">{"".join(_filas_chat)}</div>',
