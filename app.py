@@ -1152,7 +1152,7 @@ def calcular_probabilidad_base(promedio_alumno, examen_alumno, datos_uni):
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
    page_title="Uniwebmx - Admisiones Inteligentes",
-   page_icon="logo_chromo.png",
+   page_icon="logo_chrome.png",
    layout="wide",
    initial_sidebar_state="expanded"
 )
@@ -1162,7 +1162,7 @@ st.set_page_config(
 # metatags de iOS/Android se inyectan con JS vía components.html, que
 # corre en un iframe same-origin y puede escribir en window.parent.document.
 # Si el usuario da "Agregar a pantalla de inicio" en su celular, esto hace
-# que el ícono use logo_chromo.png y el nombre corto sea "uniwebmx" en vez
+# que el ícono use logo_chrome.png y el nombre corto sea "uniwebmx" en vez
 # del nombre largo de la pestaña o un ícono genérico.
 def _pwa_encode_image(path):
     try:
@@ -1171,7 +1171,7 @@ def _pwa_encode_image(path):
     except FileNotFoundError:
         return None
 
-_logo_chromo_b64 = _pwa_encode_image("logo_chromo.png")
+_logo_chromo_b64 = _pwa_encode_image("logo_chrome.png")
 
 if _logo_chromo_b64:
     _pwa_manifest = {
