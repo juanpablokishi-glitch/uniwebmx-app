@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import base64
 import os
@@ -1151,10 +1152,86 @@ def calcular_probabilidad_base(promedio_alumno, examen_alumno, datos_uni):
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
    page_title="Uniwebmx - Admisiones Inteligentes",
-   page_icon=None,
+   page_icon="logo_chromo.png",
    layout="wide",
    initial_sidebar_state="expanded"
 )
+
+# --- PWA: "Agregar a pantalla de inicio" con nombre e ícono propios ---
+# Streamlit no expone el <head> directamente, así que el manifest y los
+# metatags de iOS/Android se inyectan con JS vía components.html, que
+# corre en un iframe same-origin y puede escribir en window.parent.document.
+# Si el usuario da "Agregar a pantalla de inicio" en su celular, esto hace
+# que el ícono use logo_chromo.png y el nombre corto sea "uniwebmx" en vez
+# del nombre largo de la pestaña o un ícono genérico.
+def _pwa_encode_image(path):
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except FileNotFoundError:
+        return None
+
+_logo_chromo_b64 = _pwa_encode_image("logo_chromo.png")
+
+if _logo_chromo_b64:
+    _pwa_manifest = {
+        "name": "Uniwebmx - Admisiones Inteligentes",
+        "short_name": "uniwebmx",
+        "start_url": ".",
+        "display": "standalone",
+        "background_color": "#FFFFFF",
+        "theme_color": "#4A5D32",
+        "icons": [
+            {"src": f"data:image/png;base64,{_logo_chromo_b64}", "sizes": "192x192", "type": "image/png"},
+            {"src": f"data:image/png;base64,{_logo_chromo_b64}", "sizes": "512x512", "type": "image/png"},
+        ],
+    }
+    _pwa_manifest_json = json.dumps(_pwa_manifest)
+
+    components.html(f"""
+    <script>
+    (function() {{
+        var doc = window.parent.document;
+        if (doc.getElementById('uniwebmx-manifest')) return;
+
+        var manifestStr = {json.dumps(_pwa_manifest_json)};
+        var blob = new Blob([manifestStr], {{type: 'application/manifest+json'}});
+        var manifestUrl = URL.createObjectURL(blob);
+
+        var link = doc.createElement('link');
+        link.id = 'uniwebmx-manifest';
+        link.rel = 'manifest';
+        link.href = manifestUrl;
+        doc.head.appendChild(link);
+
+        var icon = doc.createElement('link');
+        icon.rel = 'apple-touch-icon';
+        icon.href = 'data:image/png;base64,{_logo_chromo_b64}';
+        doc.head.appendChild(icon);
+
+        var themeColor = doc.createElement('meta');
+        themeColor.name = 'theme-color';
+        themeColor.content = '#4A5D32';
+        doc.head.appendChild(themeColor);
+
+        var appleCapable = doc.createElement('meta');
+        appleCapable.name = 'apple-mobile-web-app-capable';
+        appleCapable.content = 'yes';
+        doc.head.appendChild(appleCapable);
+
+        var appleStatusBar = doc.createElement('meta');
+        appleStatusBar.name = 'apple-mobile-web-app-status-bar-style';
+        appleStatusBar.content = 'default';
+        doc.head.appendChild(appleStatusBar);
+
+        var appleTitle = doc.createElement('meta');
+        appleTitle.name = 'apple-mobile-web-app-title';
+        appleTitle.content = 'uniwebmx';
+        doc.head.appendChild(appleTitle);
+    }})();
+    </script>
+    """, height=0, width=0)
+
 # --- CAPTURA DE NAVEGACIÓN VIA URL ---
 
 # 1. Interceptor de navegación interna via ?nav=X&t=TOKEN — corre PRIMERO
