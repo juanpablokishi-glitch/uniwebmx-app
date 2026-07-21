@@ -630,6 +630,7 @@ def guardar_datos_usuario(username):
         "perfil_universidades_interes": st.session_state.get("perfil_universidades_interes", []),
         "perfil_preparatoria": st.session_state.get("perfil_preparatoria", ""),
         "simulador_usado": st.session_state.get("simulador_usado", False),
+        "resultados_orientacion": st.session_state.get("resultados_orientacion", None),
     }
     try:
         # Intentar actualizar primero
@@ -688,6 +689,7 @@ def restaurar_sesion_usuario(username):
     st.session_state.perfil_universidades_interes = datos.get("perfil_universidades_interes", [])
     st.session_state.perfil_preparatoria = datos.get("perfil_preparatoria", "")
     st.session_state.simulador_usado = datos.get("simulador_usado", False)
+    st.session_state.resultados_orientacion = datos.get("resultados_orientacion", None)
     # Estatus de menor de edad y consentimiento del tutor (se leen directo de "usuarios",
     # no de "datos_usuario", porque son datos de cuenta, no de progreso).
     try:
@@ -1085,6 +1087,259 @@ UNIVERSIDADES_DATA = {
 }
 
 
+# =================================================================
+# TEST DE ORIENTACIÓN VOCACIONAL — RIASEC (O*NET Interest Profiler)
+# + IPIP (Mini-IPIP, Big Five)
+# =================================================================
+# Ambos instrumentos son de uso libre:
+# - RIASEC: "O*NET Interest Profiler" del U.S. Department of Labor,
+#   licenciado bajo Creative Commons Attribution 4.0 (CC BY 4.0). Traducido
+#   al español para esta plataforma a partir del formulario oficial en
+#   inglés (onetcenter.org/IP.html). Basado en el modelo de John Holland
+#   (1997): Realista, Investigador, Artístico, Social, Emprendedor,
+#   Convencional.
+# - IPIP: los 20 ítems del "Mini-IPIP" (Donnellan, Oswald, Baird & Lucas,
+#   2006), construidos a partir del International Personality Item Pool,
+#   un banco de ítems explícitamente de dominio público para cualquier uso.
+#   Mide los 5 grandes rasgos de personalidad (Big Five).
+
+RIASEC_LABELS = {
+    "R": "Realista",
+    "I": "Investigador",
+    "A": "Artístico",
+    "S": "Social",
+    "E": "Emprendedor",
+    "C": "Convencional",
+}
+
+RIASEC_DESCRIPCIONES = {
+    "R": "Te gusta trabajar con las manos, herramientas, máquinas o el aire libre.",
+    "I": "Te gusta investigar, resolver problemas y entender cómo funcionan las cosas.",
+    "A": "Te gusta crear, expresarte y trabajar en cosas originales o artísticas.",
+    "S": "Te gusta ayudar, enseñar, cuidar o trabajar directamente con personas.",
+    "E": "Te gusta liderar, vender, negociar y emprender proyectos o negocios.",
+    "C": "Te gusta el orden, los datos precisos y seguir procesos claros.",
+}
+
+# 60 ítems, 10 por categoría, en el mismo orden y agrupación que el
+# O*NET Interest Profiler Short Form oficial.
+RIASEC_ITEMS = [
+    # Realista
+    {"texto": "Construir gabinetes de cocina", "cat": "R"},
+    {"texto": "Colocar ladrillo o azulejo", "cat": "R"},
+    {"texto": "Reparar electrodomésticos", "cat": "R"},
+    {"texto": "Criar peces en un criadero", "cat": "R"},
+    {"texto": "Ensamblar piezas electrónicas", "cat": "R"},
+    {"texto": "Manejar un camión para repartir paquetes a oficinas y casas", "cat": "R"},
+    {"texto": "Probar la calidad de piezas antes de enviarlas", "cat": "R"},
+    {"texto": "Reparar e instalar cerraduras", "cat": "R"},
+    {"texto": "Instalar y operar máquinas para fabricar productos", "cat": "R"},
+    {"texto": "Apagar incendios forestales", "cat": "R"},
+    # Investigador
+    {"texto": "Desarrollar un nuevo medicamento", "cat": "I"},
+    {"texto": "Estudiar formas de reducir la contaminación del agua", "cat": "I"},
+    {"texto": "Realizar experimentos químicos", "cat": "I"},
+    {"texto": "Estudiar el movimiento de los planetas", "cat": "I"},
+    {"texto": "Examinar muestras de sangre con un microscopio", "cat": "I"},
+    {"texto": "Investigar la causa de un incendio", "cat": "I"},
+    {"texto": "Desarrollar una forma de predecir mejor el clima", "cat": "I"},
+    {"texto": "Trabajar en un laboratorio de biología", "cat": "I"},
+    {"texto": "Inventar un sustituto del azúcar", "cat": "I"},
+    {"texto": "Hacer pruebas de laboratorio para identificar enfermedades", "cat": "I"},
+    # Artístico
+    {"texto": "Escribir libros u obras de teatro", "cat": "A"},
+    {"texto": "Pintar escenografías para obras de teatro", "cat": "A"},
+    {"texto": "Tocar un instrumento musical", "cat": "A"},
+    {"texto": "Escribir guiones para películas o series de televisión", "cat": "A"},
+    {"texto": "Componer o arreglar música", "cat": "A"},
+    {"texto": "Bailar jazz o tap", "cat": "A"},
+    {"texto": "Dibujar", "cat": "A"},
+    {"texto": "Cantar en una banda", "cat": "A"},
+    {"texto": "Crear efectos especiales para películas", "cat": "A"},
+    {"texto": "Editar películas", "cat": "A"},
+    # Social
+    {"texto": "Enseñarle a alguien una rutina de ejercicio", "cat": "S"},
+    {"texto": "Enseñar a niños a practicar deportes", "cat": "S"},
+    {"texto": "Ayudar a personas con problemas personales o emocionales", "cat": "S"},
+    {"texto": "Enseñar lenguaje de señas a personas sordas o con dificultad auditiva", "cat": "S"},
+    {"texto": "Dar orientación vocacional a las personas", "cat": "S"},
+    {"texto": "Ayudar a dirigir una sesión de terapia grupal", "cat": "S"},
+    {"texto": "Dar terapia de rehabilitación", "cat": "S"},
+    {"texto": "Cuidar niños en una guardería", "cat": "S"},
+    {"texto": "Hacer trabajo voluntario en una organización sin fines de lucro", "cat": "S"},
+    {"texto": "Dar clases en preparatoria", "cat": "S"},
+    # Emprendedor
+    {"texto": "Comprar y vender acciones y bonos", "cat": "E"},
+    {"texto": "Negociar contratos de negocios", "cat": "E"},
+    {"texto": "Administrar una tienda", "cat": "E"},
+    {"texto": "Representar a un cliente en un juicio", "cat": "E"},
+    {"texto": "Operar un salón de belleza o barbería", "cat": "E"},
+    {"texto": "Comercializar una nueva línea de ropa", "cat": "E"},
+    {"texto": "Administrar un departamento dentro de una empresa grande", "cat": "E"},
+    {"texto": "Vender mercancía en una tienda departamental", "cat": "E"},
+    {"texto": "Iniciar tu propio negocio", "cat": "E"},
+    {"texto": "Administrar una tienda de ropa", "cat": "E"},
+    # Convencional
+    {"texto": "Crear una hoja de cálculo con software de computadora", "cat": "C"},
+    {"texto": "Calcular el salario de empleados", "cat": "C"},
+    {"texto": "Revisar registros o formularios en busca de errores", "cat": "C"},
+    {"texto": "Inventariar suministros con una computadora portátil", "cat": "C"},
+    {"texto": "Instalar software en varias computadoras de una red grande", "cat": "C"},
+    {"texto": "Registrar pagos de renta", "cat": "C"},
+    {"texto": "Usar una calculadora", "cat": "C"},
+    {"texto": "Llevar el control de inventarios", "cat": "C"},
+    {"texto": "Llevar registros de envíos y recepciones", "cat": "C"},
+    {"texto": "Sellar, clasificar y repartir correspondencia en una organización", "cat": "C"},
+]
+
+IPIP_LABELS = {
+    "extraversion": "Extraversión",
+    "amabilidad": "Amabilidad",
+    "responsabilidad": "Responsabilidad",
+    "estabilidad": "Estabilidad emocional",
+    "apertura": "Apertura a la experiencia",
+}
+
+# 20 ítems del Mini-IPIP. "signo": 1 = se califica tal cual, -1 = se invierte
+# al calcular el puntaje (así funciona el instrumento original).
+IPIP_ITEMS = [
+    {"texto": "Soy el alma de la fiesta", "rasgo": "extraversion", "signo": 1},
+    {"texto": "Hablo con mucha gente distinta en las fiestas", "rasgo": "extraversion", "signo": 1},
+    {"texto": "No hablo mucho", "rasgo": "extraversion", "signo": -1},
+    {"texto": "Prefiero quedarme en un segundo plano", "rasgo": "extraversion", "signo": -1},
+    {"texto": "Me identifico con los sentimientos de los demás", "rasgo": "amabilidad", "signo": 1},
+    {"texto": "Siento las emociones de otras personas", "rasgo": "amabilidad", "signo": 1},
+    {"texto": "En realidad no me interesan los demás", "rasgo": "amabilidad", "signo": -1},
+    {"texto": "No me interesan los problemas de otras personas", "rasgo": "amabilidad", "signo": -1},
+    {"texto": "Hago mis pendientes de inmediato", "rasgo": "responsabilidad", "signo": 1},
+    {"texto": "Me gusta el orden", "rasgo": "responsabilidad", "signo": 1},
+    {"texto": "Frecuentemente olvido poner las cosas en su lugar", "rasgo": "responsabilidad", "signo": -1},
+    {"texto": "Dejo las cosas hechas un desastre", "rasgo": "responsabilidad", "signo": -1},
+    {"texto": "Tengo cambios de humor frecuentes", "rasgo": "estabilidad", "signo": -1},
+    {"texto": "Me altero con facilidad", "rasgo": "estabilidad", "signo": -1},
+    {"texto": "Estoy tranquilo(a) la mayor parte del tiempo", "rasgo": "estabilidad", "signo": 1},
+    {"texto": "Casi nunca me siento triste", "rasgo": "estabilidad", "signo": 1},
+    {"texto": "Tengo una imaginación muy vívida", "rasgo": "apertura", "signo": 1},
+    {"texto": "Se me dificulta entender ideas abstractas", "rasgo": "apertura", "signo": -1},
+    {"texto": "No me interesan las ideas abstractas", "rasgo": "apertura", "signo": -1},
+    {"texto": "No tengo mucha imaginación", "rasgo": "apertura", "signo": -1},
+]
+
+# Mapeo aproximado (no oficial) de las carreras que ya usa la plataforma en
+# el onboarding a códigos Holland (RIASEC), basado en los perfiles típicos
+# reportados para ocupaciones equivalentes en la base O*NET. Sirve como
+# punto de partida para las recomendaciones; se puede afinar con el tiempo.
+CARRERAS_RIASEC = {
+    "Administración": "EC",
+    "Arquitectura": "AIR",
+    "Comunicación": "ASE",
+    "Contaduría": "CE",
+    "Derecho": "ES",
+    "Diseño": "AR",
+    "Economía": "ICE",
+    "Enfermería": "SI",
+    "Filosofía": "IA",
+    "Gastronomía": "RA",
+    "Ingeniería en Sistemas / Software": "IRC",
+    "Ingeniería Industrial": "RIC",
+    "Ingeniería Mecatrónica": "RI",
+    "Ingeniería Civil": "RI",
+    "Marketing / Mercadotecnia": "EAS",
+    "Medicina": "IS",
+    "Negocios Internacionales": "ECS",
+    "Psicología": "SIA",
+    "Relaciones Internacionales": "SEI",
+    "Veterinaria y Zootecnia": "IRS",
+}
+
+
+def calcular_riasec(respuestas):
+    """respuestas: dict {indice_item: bool}. Regresa (puntajes_por_categoria, codigo_top3)."""
+    puntajes = {"R": 0, "I": 0, "A": 0, "S": 0, "E": 0, "C": 0}
+    for i, item in enumerate(RIASEC_ITEMS):
+        if respuestas.get(i):
+            puntajes[item["cat"]] += 1
+    # Orden de desempate: mayor puntaje primero; en empate, se respeta el
+    # orden R-I-A-S-E-C (igual que sugiere la hoja de resultados oficial).
+    orden_desempate = ["R", "I", "A", "S", "E", "C"]
+    ranking = sorted(puntajes.keys(), key=lambda c: (-puntajes[c], orden_desempate.index(c)))
+    codigo_top3 = "".join(ranking[:3])
+    return puntajes, codigo_top3
+
+
+def calcular_ipip(respuestas):
+    """respuestas: dict {indice_item: int 1-5}. Regresa promedio (1-5) por rasgo."""
+    acumulado = {r: [] for r in IPIP_LABELS}
+    for i, item in enumerate(IPIP_ITEMS):
+        valor = respuestas.get(i, 3)
+        if item["signo"] == -1:
+            valor = 6 - valor
+        acumulado[item["rasgo"]].append(valor)
+    return {r: round(sum(vals) / len(vals), 2) for r, vals in acumulado.items()}
+
+
+def carreras_sugeridas_por_codigo(codigo_top3, top_n=6):
+    """Ordena las carreras de CARRERAS_RIASEC por qué tanto coinciden con el código del alumno."""
+    pesos_posicion = {0: 3, 1: 2, 2: 1}  # peso según si la letra es su 1a, 2a o 3a preferencia
+    resultados = []
+    for carrera, codigo_carrera in CARRERAS_RIASEC.items():
+        puntaje = 0
+        for pos, letra in enumerate(codigo_top3):
+            if letra in codigo_carrera:
+                puntaje += pesos_posicion.get(pos, 0)
+        if puntaje > 0:
+            resultados.append((carrera, puntaje))
+    resultados.sort(key=lambda x: -x[1])
+    return resultados[:top_n]
+
+
+# --- Mini-test conversacional con Hugo ---
+# No son las 60+20 preguntas literales del test formal: son preguntas abiertas
+# y naturales que Hugo hace en modo chat. Sus respuestas en texto libre se
+# mandan a Gemini para que ESTIME los mismos puntajes RIASEC + IPIP que
+# arrojaría el test formal, marcando el resultado como aproximado.
+ORIENTACION_CONV_PREGUNTAS = [
+    "Si tuvieras una tarde totalmente libre, sin pendientes ni tarea, ¿qué te gustaría hacer?",
+    "Piensa en la última vez que resolviste algo que te dio mucha satisfacción. ¿Qué tipo de problema era?",
+    "¿Prefieres trabajar solo, en equipo, o depende de la situación? Cuéntame por qué.",
+    "¿Qué tema o materia podrías estudiar por horas sin aburrirte?",
+    "Cuando algo no te sale como esperabas, ¿cómo reaccionas normalmente?",
+    "¿Te imaginas más liderando tu propio proyecto o negocio, o en un rol de apoyo muy especializado en algo?",
+    "¿Qué tan importante es para ti el orden y tener todo bien organizado en tu día a día?",
+    "Si pudieras ayudar a resolver un problema del mundo, ¿cuál elegirías y por qué?",
+]
+
+
+def _interpretar_conversacion_orientacion(historial_qna):
+    """historial_qna: lista de {"pregunta":..., "respuesta":...}.
+    Regresa dict {"riasec": {...}, "ipip": {...}} o None si algo falla."""
+    transcript = "\n\n".join(f"P: {qa['pregunta']}\nR: {qa['respuesta']}" for qa in historial_qna)
+    prompt_sistema = (
+        "Eres un psicólogo vocacional experto en el modelo RIASEC de Holland y en el modelo de "
+        "personalidad Big Five (IPIP). Vas a leer una conversación breve con un estudiante de "
+        "preparatoria y vas a ESTIMAR sus puntajes, basándote en el contenido y tono de sus "
+        "respuestas (no en contar palabras literalmente).\n\n"
+        "Responde ÚNICAMENTE con un objeto JSON válido, sin texto antes ni después, sin backticks, "
+        "exactamente con esta forma:\n"
+        '{"riasec": {"R": 0, "I": 0, "A": 0, "S": 0, "E": 0, "C": 0}, '
+        '"ipip": {"extraversion": 3.0, "amabilidad": 3.0, "responsabilidad": 3.0, '
+        '"estabilidad": 3.0, "apertura": 3.0}}\n\n'
+        "Cada valor de 'riasec' es un entero de 0 a 10 (qué tanto encaja ese interés con lo que "
+        "describió). Cada valor de 'ipip' es un número de 1.0 a 5.0 (qué tan presente parece estar "
+        "ese rasgo de personalidad)."
+    )
+    try:
+        model_interp = genai.GenerativeModel(GEMINI_MODEL, system_instruction=prompt_sistema)
+        respuesta_interp = model_interp.generate_content(transcript)
+        texto_interp = respuesta_interp.text.strip().replace("```json", "").replace("```", "").strip()
+        data = json.loads(texto_interp)
+        if "riasec" not in data or "ipip" not in data:
+            return None
+        return data
+    except Exception:
+        return None
+
+
 def construir_contexto_universidades(universidades_interes=None):
     """
     Arma un bloque de texto con la información verificada de UNIVERSIDADES_DATA
@@ -1351,7 +1606,7 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 # Filtro de seguridad: Si no está logueado, prohibir acceso al Hub
-if not st.session_state.logged_in and st.session_state.page in ["locker", "chat", "simulador", "mi_aplicacion", "mensajes", "onboarding"]:
+if not st.session_state.logged_in and st.session_state.page in ["locker", "chat", "simulador", "mi_aplicacion", "mensajes", "onboarding", "orientacion"]:
     st.session_state.page = "login"
 # Filtro de seguridad: el Panel (admin/universidades) requiere sesión Y el rol correcto.
 # Un alumno normal jamás debe poder entrar tecleando la URL a mano.
@@ -1362,8 +1617,13 @@ elif st.session_state.logged_in and st.session_state.page in PANEL_ADMIN_PAGES a
 elif st.session_state.page == "panel_usuarios" and not es_admin():
     # Solo el equipo de Uniwebmx puede asignar roles, una universidad no.
     st.session_state.page = "panel_admin"
+elif st.session_state.page == "panel_chat" and es_universidad():
+    # "Uso de Hugo (chat)" es una métrica de producto para Uniwebmx, no algo
+    # que le sirva a una universidad. Ya no aparece en su sidebar, pero por si
+    # alguien teclea la URL a mano, la redirigimos igual que con panel_usuarios.
+    st.session_state.page = "panel_admin"
 # Determinar si el usuario está dentro del Hub de alumnos o del Panel admin/universidades
-es_hub = st.session_state.page in ["locker", "chat", "simulador", "mi_aplicacion", "mensajes"]
+es_hub = st.session_state.page in ["locker", "chat", "simulador", "mi_aplicacion", "mensajes", "orientacion"]
 es_panel = st.session_state.page in PANEL_ADMIN_PAGES
 
 
@@ -2131,6 +2391,7 @@ if es_hub:
    _icon_locker = '<path d="M5 8a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><path d="M10 11h4M12 9v4"/>'
    _icon_chat   = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'
    _icon_sim    = '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'
+   _icon_orient = '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>'
    _icon_app    = '<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>'
    _icon_msg    = '<path d="M4 4h16v12H7l-3 3z"/><path d="M7 9h10M7 12h6"/>'
 
@@ -2149,7 +2410,7 @@ if es_hub:
        _items_espacio.append(_sb_item("Mi Aplicación", "mi_aplicacion", _icon_app))
        _items_espacio.append(_sb_item("Centro de Mensajes", "mensajes", _icon_msg))
        _html_items_espacio = "".join(_items_espacio)
-       _html_items_analisis = _sb_item("Simulador", "simulador", _icon_sim)
+       _html_items_analisis = _sb_item("Simulador", "simulador", _icon_sim) + _sb_item("Orientación Vocacional", "orientacion", _icon_orient)
 
        st.markdown(
            f'<div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">{_logo_html}</div>'
@@ -2842,6 +3103,7 @@ def _panel_cargar_datos_crudos():
             "perfil_carreras": d.get("perfil_carreras", []) or [],
             "perfil_universidades_interes": d.get("perfil_universidades_interes", []) or [],
             "perfil_preparatoria": d.get("perfil_preparatoria") or "",
+            "resultados_orientacion": d.get("resultados_orientacion") or {},
             "actualizado": _reg.get("updated_at"),
         })
     return pd.DataFrame(filas)
@@ -4344,6 +4606,42 @@ elif st.session_state.page == "chat":
                             "no la ha simulado todavía y sugiérele ir al Simulador Estadístico."
                         )
 
+                    # --- RESULTADO DEL TEST DE ORIENTACIÓN VOCACIONAL (RIASEC + IPIP) ---
+                    # Si el alumno ya hizo el test (completo o el mini-test conversacional),
+                    # Hugo lo usa para dar recomendaciones de carrera ancladas a datos reales
+                    # del alumno en vez de opiniones genéricas.
+                    resultado_orient_actual = st.session_state.get("resultados_orientacion") or {}
+                    if resultado_orient_actual:
+                        _codigo_chat = resultado_orient_actual.get("codigo_top3", "")
+                        _tipo_chat = resultado_orient_actual.get("tipo", "completo")
+                        _ipip_chat = resultado_orient_actual.get("ipip", {})
+                        _lineas_orient = [f"Código Holland (RIASEC): {_codigo_chat}"]
+                        for _letra_chat in _codigo_chat:
+                            _lineas_orient.append(f"  - {_letra_chat} ({RIASEC_LABELS.get(_letra_chat, '')}): {RIASEC_DESCRIPCIONES.get(_letra_chat, '')}")
+                        if _ipip_chat:
+                            _lineas_orient.append("Perfil de personalidad (1-5): " + ", ".join(
+                                f"{IPIP_LABELS.get(r, r)}={v}" for r, v in _ipip_chat.items()
+                            ))
+                        _carreras_sugeridas_chat = carreras_sugeridas_por_codigo(_codigo_chat) if _codigo_chat else []
+                        if _carreras_sugeridas_chat:
+                            _lineas_orient.append("Carreras que mejor encajan con este perfil: " + ", ".join(
+                                c for c, _ in _carreras_sugeridas_chat
+                            ))
+                        _origen_orient = (
+                            "Este resultado viene del mini-test conversacional (una estimación rápida, "
+                            "menos precisa) — si el alumno quiere algo más preciso, sugiérele hacer el "
+                            "test completo en 'Orientación Vocacional'."
+                            if _tipo_chat == "conversacional" else
+                            "Este resultado viene del test completo de Orientación Vocacional (RIASEC + IPIP)."
+                        )
+                        partes_contexto.append(
+                            "--- RESULTADO DEL TEST DE ORIENTACIÓN VOCACIONAL ---\n"
+                            + "\n".join(_lineas_orient)
+                            + f"\n\n{_origen_orient} Úsalo para personalizar tus recomendaciones de "
+                            "carrera y universidad cuando el alumno pregunte algo relacionado con qué "
+                            "estudiar o qué se le daría bien, en vez de dar una respuesta genérica."
+                        )
+
                     info_doc = ""
                     if partes_contexto:
                         info_doc = "\n\n[CONTEXTO DEL ALUMNO]\n" + "\n\n".join(partes_contexto)
@@ -4381,7 +4679,13 @@ elif st.session_state.page == "chat":
                             "verificado, en vez de inventar cifras.\n"
                             "5. Si el contexto trae 'PROBABILIDADES YA CALCULADAS EN EL SIMULADOR', "
                             "úsalas tal cual cuando te pregunten por probabilidades de admisión — no "
-                            "pidas de nuevo el perfil del alumno ni inventes un número distinto.\n\n"
+                            "pidas de nuevo el perfil del alumno ni inventes un número distinto.\n"
+                            "6. Si el contexto trae 'RESULTADO DEL TEST DE ORIENTACIÓN VOCACIONAL', "
+                            "úsalo para fundamentar tus recomendaciones de carrera (menciona su código "
+                            "Holland o sus rasgos cuando sea relevante), en vez de dar sugerencias "
+                            "genéricas que ignoren ese dato. Si el resultado es del mini-test "
+                            "conversacional, acláralo como una estimación rápida y ofrece el test "
+                            "completo para algo más preciso.\n\n"
                             "No uses emojis en tus respuestas."
                         ),
                     )
@@ -4553,6 +4857,247 @@ elif st.session_state.page == "simulador":
     else:
         st.info("Captura tu promedio y examen arriba y da clic en \"Calcular mis probabilidades\" para ver tu gráfica personalizada.")
 
+# --- VISTA: TEST DE ORIENTACIÓN VOCACIONAL (RIASEC + IPIP) ---
+elif st.session_state.page == "orientacion":
+    st.markdown("""
+    <div class="hero-section-locker">
+        <h1 style='font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;'>Orientación Vocacional</h1>
+        <p style='font-size: 1.35rem; color: #1A1A1A; max-width: 850px; margin: 0 auto; line-height: 1.6; font-weight: 400; opacity: 0.9;'>
+            Un test de intereses (RIASEC) y de personalidad (IPIP) para ayudarte a descubrir qué carreras encajan mejor contigo.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if "orientacion_paso" not in st.session_state:
+        st.session_state.orientacion_paso = 0
+
+    _paso = st.session_state.orientacion_paso
+    _categorias_orden = ["R", "I", "A", "S", "E", "C"]
+
+    # --- Paso 0: intro ---
+    if _paso == 0:
+        _resultado_previo = st.session_state.get("resultados_orientacion")
+        if _resultado_previo:
+            _tipo_previo = _resultado_previo.get("tipo", "completo")
+            _etiqueta_tipo = "mini-test conversacional (estimado)" if _tipo_previo == "conversacional" else "test completo"
+            st.success(f"Ya tienes un resultado guardado ({_etiqueta_tipo}): tu código Holland es **{_resultado_previo.get('codigo_top3', '')}**.")
+            col_ver, col_repetir = st.columns(2)
+            with col_ver:
+                if st.button("Ver mi resultado", use_container_width=True):
+                    st.session_state.orientacion_paso = 8
+                    st.rerun()
+            with col_repetir:
+                if st.button("Volver a hacer el test", use_container_width=True):
+                    st.session_state.orientacion_paso = 0
+                    st.session_state.pop("resultados_orientacion", None)
+                    st.rerun()
+        else:
+            st.markdown("""
+            <div style="background:#F5F5F3;border-radius:12px;padding:20px 24px;margin-bottom:1.2rem;">
+                <p style="margin:0 0 10px;font-weight:600;">Elige cómo hacerlo</p>
+                <ul style="margin:0;padding-left:18px;line-height:1.7;color:#333;">
+                    <li><b>Test completo (RIASEC + IPIP):</b> 60 actividades de intereses + 20 frases de personalidad. Toma 20-25 minutos y da el resultado más preciso.</li>
+                    <li><b>Mini-test conversacional con Hugo:</b> una plática de 8 preguntas abiertas, ~5 minutos. Hugo estima tu perfil a partir de lo que le cuentes — es más rápido pero menos exacto.</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+            st.caption("Basado en el O*NET Interest Profiler (U.S. Department of Labor, licencia CC BY 4.0) y el Mini-IPIP (Donnellan et al., 2006), ambos de uso libre.")
+            col_completo, col_conv = st.columns(2)
+            with col_completo:
+                if st.button("Test completo", type="primary", use_container_width=True):
+                    st.session_state.orientacion_paso = 1
+                    st.rerun()
+            with col_conv:
+                if st.button("Mini-test con Hugo", use_container_width=True):
+                    st.session_state.orientacion_conv_qna = []
+                    st.session_state.orientacion_conv_indice = 0
+                    st.session_state.orientacion_paso = 9
+                    st.rerun()
+
+    # --- Pasos 1-6: RIASEC, una categoría por página ---
+    elif 1 <= _paso <= 6:
+        _cat = _categorias_orden[_paso - 1]
+        st.progress(_paso / 8, text=f"Parte 1 de 2 — Intereses ({_paso}/6)")
+        st.markdown(f"##### {RIASEC_LABELS[_cat]}")
+        st.caption("Marca las actividades que te gustaría hacer. No pienses en el sueldo ni en cuánto estudio necesitan, solo en si te gustaría hacerlas.")
+        with st.form(f"form_riasec_{_cat}"):
+            _indices_cat = [i for i, item in enumerate(RIASEC_ITEMS) if item["cat"] == _cat]
+            for i in _indices_cat:
+                st.checkbox(RIASEC_ITEMS[i]["texto"], key=f"riasec_{i}")
+            _texto_boton = "Siguiente" if _paso < 6 else "Continuar a personalidad"
+            _avanzar = st.form_submit_button(_texto_boton, type="primary", use_container_width=True)
+        if _paso > 1:
+            if st.button("← Atrás", key=f"atras_riasec_{_cat}"):
+                st.session_state.orientacion_paso -= 1
+                st.rerun()
+        if _avanzar:
+            st.session_state.orientacion_paso += 1
+            st.rerun()
+
+    # --- Paso 7: IPIP ---
+    elif _paso == 7:
+        st.progress(7 / 8, text="Parte 2 de 2 — Personalidad")
+        st.markdown("##### ¿Qué tan bien te describe cada frase?")
+        st.caption("1 = Muy en desacuerdo · 5 = Muy de acuerdo")
+        with st.form("form_ipip"):
+            for i, item in enumerate(IPIP_ITEMS):
+                st.select_slider(
+                    item["texto"],
+                    options=[1, 2, 3, 4, 5],
+                    value=st.session_state.get(f"ipip_{i}", 3),
+                    key=f"ipip_{i}",
+                )
+            _finalizar = st.form_submit_button("Ver mis resultados", type="primary", use_container_width=True)
+        if st.button("← Atrás", key="atras_ipip"):
+            st.session_state.orientacion_paso -= 1
+            st.rerun()
+        if _finalizar:
+            _resp_riasec = {i: st.session_state.get(f"riasec_{i}", False) for i in range(len(RIASEC_ITEMS))}
+            _resp_ipip = {i: st.session_state.get(f"ipip_{i}", 3) for i in range(len(IPIP_ITEMS))}
+            _puntajes_riasec, _codigo_top3 = calcular_riasec(_resp_riasec)
+            _perfil_ipip = calcular_ipip(_resp_ipip)
+            st.session_state.resultados_orientacion = {
+                "riasec_puntajes": _puntajes_riasec,
+                "codigo_top3": _codigo_top3,
+                "ipip": _perfil_ipip,
+                "fecha": datetime.now().isoformat(),
+                "tipo": "completo",
+            }
+            guardar_datos_usuario(st.session_state.get("user"))
+            st.session_state.orientacion_paso = 8
+            st.rerun()
+
+    # --- Paso 8: resultados ---
+    elif _paso == 8:
+        _resultado = st.session_state.get("resultados_orientacion")
+        if not _resultado:
+            st.warning("Todavía no tienes un resultado. Empieza el test primero.")
+            if st.button("Ir al inicio del test"):
+                st.session_state.orientacion_paso = 0
+                st.rerun()
+        else:
+            _puntajes = _resultado["riasec_puntajes"]
+            _codigo = _resultado["codigo_top3"]
+            _ipip = _resultado["ipip"]
+            _tipo_resultado = _resultado.get("tipo", "completo")
+
+            if _tipo_resultado == "conversacional":
+                st.info("Este es un resultado **estimado** por Hugo a partir de tu mini-test conversacional. Si quieres algo más preciso, puedes hacer el test completo cuando quieras.")
+
+            st.markdown(f"### Tu código Holland: {_codigo}")
+            st.caption("Las 3 letras representan, en orden, tus intereses vocacionales más fuertes.")
+            for letra in _codigo:
+                st.markdown(f"**{letra} — {RIASEC_LABELS[letra]}:** {RIASEC_DESCRIPCIONES[letra]}")
+
+            st.markdown("<div style='margin-top:1rem;'></div>", unsafe_allow_html=True)
+            st.markdown("##### Tu perfil de intereses (RIASEC)")
+            _df_riasec = pd.DataFrame(
+                [(RIASEC_LABELS[c], _puntajes[c]) for c in _categorias_orden],
+                columns=["Categoría", "Puntaje (de 10)"],
+            ).set_index("Categoría")
+            st.bar_chart(_df_riasec)
+
+            st.markdown("##### Tu perfil de personalidad (IPIP)")
+            _df_ipip = pd.DataFrame(
+                [(IPIP_LABELS[r], _ipip[r]) for r in IPIP_LABELS],
+                columns=["Rasgo", "Puntaje (1-5)"],
+            ).set_index("Rasgo")
+            st.bar_chart(_df_ipip)
+
+            st.markdown("<div style='margin-top:1rem;'></div>", unsafe_allow_html=True)
+            st.markdown("##### Carreras que podrían encajar contigo")
+            _sugerencias = carreras_sugeridas_por_codigo(_codigo)
+            if _sugerencias:
+                for _carrera, _puntaje in _sugerencias:
+                    st.markdown(f"- **{_carrera}**")
+            else:
+                st.caption("No encontramos coincidencias fuertes todavía — puedes explorar el Ranking de universidades para ver más opciones.")
+
+            st.markdown("<div style='margin-top:1.5rem;'></div>", unsafe_allow_html=True)
+            col_repetir_r, col_otro_modo = st.columns(2)
+            with col_repetir_r:
+                if st.button("Volver a hacer este mismo test", use_container_width=True):
+                    for i in range(len(RIASEC_ITEMS)):
+                        st.session_state.pop(f"riasec_{i}", None)
+                    for i in range(len(IPIP_ITEMS)):
+                        st.session_state.pop(f"ipip_{i}", None)
+                    st.session_state.pop("resultados_orientacion", None)
+                    st.session_state.orientacion_paso = 1 if _tipo_resultado == "completo" else 0
+                    st.rerun()
+            with col_otro_modo:
+                if _tipo_resultado == "conversacional":
+                    if st.button("Mejor hacer el test completo", type="primary", use_container_width=True):
+                        st.session_state.orientacion_paso = 1
+                        st.rerun()
+                else:
+                    if st.button("Probar el mini-test con Hugo", use_container_width=True):
+                        st.session_state.orientacion_conv_qna = []
+                        st.session_state.orientacion_conv_indice = 0
+                        st.session_state.orientacion_paso = 9
+                        st.rerun()
+
+    # --- Paso 9: mini-test conversacional con Hugo ---
+    elif _paso == 9:
+        st.markdown("##### Mini-test con Hugo")
+        st.caption("Responde con tus propias palabras, no hay respuestas correctas o incorrectas.")
+
+        if "orientacion_conv_qna" not in st.session_state:
+            st.session_state.orientacion_conv_qna = []
+        if "orientacion_conv_indice" not in st.session_state:
+            st.session_state.orientacion_conv_indice = 0
+
+        _indice_conv = st.session_state.orientacion_conv_indice
+        _total_preguntas_conv = len(ORIENTACION_CONV_PREGUNTAS)
+
+        # Mostrar la conversación hasta ahora
+        for _qa in st.session_state.orientacion_conv_qna:
+            with st.chat_message("assistant"):
+                st.write(_qa["pregunta"])
+            with st.chat_message("user"):
+                st.write(_qa["respuesta"])
+
+        if _indice_conv < _total_preguntas_conv:
+            _pregunta_actual = ORIENTACION_CONV_PREGUNTAS[_indice_conv]
+            with st.chat_message("assistant"):
+                st.write(_pregunta_actual)
+            st.progress((_indice_conv) / _total_preguntas_conv, text=f"Pregunta {_indice_conv + 1} de {_total_preguntas_conv}")
+            _respuesta_conv = st.chat_input("Escribe tu respuesta...")
+            if _respuesta_conv:
+                st.session_state.orientacion_conv_qna.append({"pregunta": _pregunta_actual, "respuesta": _respuesta_conv})
+                st.session_state.orientacion_conv_indice += 1
+                st.rerun()
+            if st.button("← Cancelar y volver"):
+                st.session_state.orientacion_paso = 0
+                st.rerun()
+        else:
+            with st.spinner("Hugo está pensando en tu perfil..."):
+                _interpretacion = _interpretar_conversacion_orientacion(st.session_state.orientacion_conv_qna)
+            if not _interpretacion:
+                st.error("No pudimos generar tu resultado en este momento. Intenta de nuevo en un momento, o haz el test completo para un resultado garantizado.")
+                col_reintentar, col_ir_completo = st.columns(2)
+                with col_reintentar:
+                    if st.button("Reintentar", use_container_width=True):
+                        st.rerun()
+                with col_ir_completo:
+                    if st.button("Hacer el test completo", use_container_width=True):
+                        st.session_state.orientacion_paso = 1
+                        st.rerun()
+            else:
+                _riasec_est = _interpretacion["riasec"]
+                _orden_desempate_conv = ["R", "I", "A", "S", "E", "C"]
+                _ranking_conv = sorted(_riasec_est.keys(), key=lambda c: (-_riasec_est.get(c, 0), _orden_desempate_conv.index(c) if c in _orden_desempate_conv else 99))
+                _codigo_conv = "".join(_ranking_conv[:3])
+                st.session_state.resultados_orientacion = {
+                    "riasec_puntajes": {c: _riasec_est.get(c, 0) for c in _orden_desempate_conv},
+                    "codigo_top3": _codigo_conv,
+                    "ipip": _interpretacion["ipip"],
+                    "fecha": datetime.now().isoformat(),
+                    "tipo": "conversacional",
+                }
+                guardar_datos_usuario(st.session_state.get("user"))
+                st.session_state.orientacion_paso = 8
+                st.rerun()
+
 # =================================================================
 # PANEL DE ADMINISTRADOR / UNIVERSIDADES
 # =================================================================
@@ -4581,18 +5126,24 @@ elif st.session_state.page == "panel_admin":
         c2.metric("Perfil completo", f"{_perfil_ok}/{_total}")
         c3.metric("Usaron el simulador", f"{_simulador}/{_total}")
 
-        c5, c6, c7 = st.columns(3)
-        c5.metric("Mensajes enviados a Hugo", _mensajes)
-        c6.metric("Alumnos que le han hablado a Hugo", f"{_con_chat}/{_total}")
-        c7.metric("Promedio de mensajes por alumno activo", round(_mensajes / _con_chat, 1) if _con_chat else 0)
+        if not es_universidad():
+            # El uso del chat de Hugo (mensajes, frecuencia) es una métrica de producto
+            # que le sirve al equipo de Uniwebmx, pero no le aporta nada a una
+            # universidad — a ellas les importan sus aplicantes, no cuánto usan el chat.
+            c5, c6, c7 = st.columns(3)
+            c5.metric("Mensajes enviados a Hugo", _mensajes)
+            c6.metric("Alumnos que le han hablado a Hugo", f"{_con_chat}/{_total}")
+            c7.metric("Promedio de mensajes por alumno activo", round(_mensajes / _con_chat, 1) if _con_chat else 0)
 
         st.markdown("<div style='margin-top:1rem;'></div>", unsafe_allow_html=True)
         _df_export = _df_panel.copy()
-        _df_export["mensajes_a_hugo"] = _df_export["historial_chat"].apply(
-            lambda h: sum(1 for m in (h or []) if m.get("role") == "user")
-        )
         _cols_export = ["username", "perfil_edad", "perfil_carreras", "perfil_universidades_interes",
-                        "perfil_preparatoria", "perfil_completo", "simulador_usado", "mensajes_a_hugo"]
+                        "perfil_preparatoria", "perfil_completo", "simulador_usado"]
+        if not es_universidad():
+            _df_export["mensajes_a_hugo"] = _df_export["historial_chat"].apply(
+                lambda h: sum(1 for m in (h or []) if m.get("role") == "user")
+            )
+            _cols_export.append("mensajes_a_hugo")
         st.download_button(
             "Descargar reporte (CSV)",
             data=_df_export[_cols_export].to_csv(index=False).encode("utf-8"),
@@ -4638,8 +5189,14 @@ elif st.session_state.page == "panel_admin":
         if _eventos_30d.empty:
             st.caption("Todavía no hay eventos registrados con fecha. Esto empieza a llenarse a partir de ahora (registros, logins, mensajes a Hugo, uso del simulador).")
         else:
-            _tabs_tend = st.tabs(["Registros", "Logins", "Mensajes a Hugo", "Uso del simulador"])
-            for _tab, _tipo in zip(_tabs_tend, ["registro", "login", "mensaje_chat", "simulador_usado"]):
+            if es_universidad():
+                _nombres_tend = ["Registros", "Logins", "Uso del simulador"]
+                _tipos_tend = ["registro", "login", "simulador_usado"]
+            else:
+                _nombres_tend = ["Registros", "Logins", "Mensajes a Hugo", "Uso del simulador"]
+                _tipos_tend = ["registro", "login", "mensaje_chat", "simulador_usado"]
+            _tabs_tend = st.tabs(_nombres_tend)
+            for _tab, _tipo in zip(_tabs_tend, _tipos_tend):
                 with _tab:
                     _serie = _panel_serie_diaria(_eventos_30d, _tipo, _usernames_scope)
                     if _serie.empty:
@@ -4795,6 +5352,30 @@ elif st.session_state.page == "panel_carreras_perfiles":
             )
         else:
             st.caption("Aún no hay suficientes datos.")
+
+        st.markdown("<div style='margin-top:1.5rem;'></div>", unsafe_allow_html=True)
+        st.markdown("##### Orientación vocacional de tus alumnos (RIASEC + IPIP)")
+        _con_orientacion = _df_panel[_df_panel["resultados_orientacion"].apply(bool)]
+        if not _con_orientacion.empty:
+            st.caption(f"{len(_con_orientacion)}/{len(_df_panel)} alumnos en este alcance han hecho el test de orientación vocacional.")
+            _letras_dominantes = _con_orientacion["resultados_orientacion"].apply(
+                lambda r: (r.get("codigo_top3") or " ")[0] if r.get("codigo_top3") else None
+            ).dropna()
+            if not _letras_dominantes.empty:
+                st.markdown("**Interés dominante (RIASEC) entre tus alumnos**")
+                _conteo_letras = _letras_dominantes.map(lambda l: RIASEC_LABELS.get(l, l)).value_counts()
+                st.bar_chart(_conteo_letras)
+            _ipip_validos = [r.get("ipip") for r in _con_orientacion["resultados_orientacion"] if r.get("ipip")]
+            if _ipip_validos:
+                _promedios_ipip = pd.DataFrame(_ipip_validos).mean(numeric_only=True)
+                _df_prom_ipip = pd.DataFrame(
+                    [(IPIP_LABELS.get(r, r), round(v, 2)) for r, v in _promedios_ipip.items()],
+                    columns=["Rasgo", "Promedio (1-5)"],
+                ).set_index("Rasgo")
+                st.markdown("**Perfil de personalidad promedio (IPIP)**")
+                st.bar_chart(_df_prom_ipip)
+        else:
+            st.caption("Todavía ningún alumno en este alcance ha hecho el test de orientación vocacional.")
 
         st.markdown("<div style='margin-top:1.5rem;'></div>", unsafe_allow_html=True)
         st.markdown("##### Perfil de tus alumnos, analizado por Hugo")
