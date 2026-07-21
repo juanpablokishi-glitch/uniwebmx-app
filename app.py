@@ -1487,6 +1487,65 @@ if _logo_chromo_b64:
     </script>
     """, height=0, width=0)
 
+# --- SEO / VISTA PREVIA AL COMPARTIR: título, descripción, favicon, Open Graph ---
+# Por default Streamlit deja el <title>"Streamlit"</title> y el <meta
+# name="description"> vacíos en el HTML estático que se manda ANTES de que
+# corra el JS de la app (eso es justo lo que Google/WhatsApp/etc. llegan a
+# indexar o mostrar como vista previa si no esperan a que la app cargue del
+# todo). Aquí forzamos esos valores lo antes posible, igual que se hace
+# arriba con el manifest de PWA: mismo truco de iframe -> window.parent.document.
+_seo_titulo = "Uniwebmx - Admisiones Inteligentes con IA"
+_seo_descripcion = (
+    "Organiza tus documentos, platica con Hugo (tu asesor de admisiones con IA) "
+    "y simula tus probabilidades de ingreso por universidad. Empieza gratis."
+)
+_seo_url = "https://uniwebmx.com"
+
+if _logo_chromo_b64:
+    components.html(f"""
+    <script>
+    (function() {{
+        var doc = window.parent.document;
+        if (doc.getElementById('uniwebmx-seo')) return;
+
+        // Título real de la pestaña (Streamlit lo pone después, esto adelanta el cambio)
+        doc.title = {json.dumps(_seo_titulo)};
+
+        function setMeta(attr, key, content) {{
+            var el = doc.querySelector('meta[' + attr + '="' + key + '"]');
+            if (!el) {{
+                el = doc.createElement('meta');
+                el.setAttribute(attr, key);
+                doc.head.appendChild(el);
+            }}
+            el.setAttribute('content', content);
+        }}
+
+        setMeta('name', 'description', {json.dumps(_seo_descripcion)});
+        setMeta('property', 'og:title', {json.dumps(_seo_titulo)});
+        setMeta('property', 'og:description', {json.dumps(_seo_descripcion)});
+        setMeta('property', 'og:type', 'website');
+        setMeta('property', 'og:url', {json.dumps(_seo_url)});
+        setMeta('property', 'og:image', 'data:image/png;base64,{_logo_chromo_b64}');
+        setMeta('name', 'twitter:card', 'summary');
+        setMeta('name', 'twitter:title', {json.dumps(_seo_titulo)});
+        setMeta('name', 'twitter:description', {json.dumps(_seo_descripcion)});
+
+        // Favicon real (Streamlit a veces no deja el ícono configurado en page_config
+        // como favicon del navegador/pestaña de resultados de Google)
+        var favicon = doc.querySelector('link[rel="icon"]') || doc.createElement('link');
+        favicon.rel = 'icon';
+        favicon.href = 'data:image/png;base64,{_logo_chromo_b64}';
+        if (!favicon.parentNode) doc.head.appendChild(favicon);
+
+        var marcador = doc.createElement('meta');
+        marcador.id = 'uniwebmx-seo';
+        marcador.name = 'uniwebmx-seo';
+        doc.head.appendChild(marcador);
+    }})();
+    </script>
+    """, height=0, width=0)
+
 # --- CAPTURA DE NAVEGACIÓN VIA URL ---
 
 # 1. Interceptor de navegación interna via ?nav=X&t=TOKEN — corre PRIMERO
@@ -4007,9 +4066,12 @@ elif st.session_state.page == "onboarding":
             )
             _seccion_reenviar_confirmacion_tutor(_user)
 
-        # Verificar si el usuario ya tiene email guardado
-        _res_onb_email = supabase_client.table("usuarios").select("email").eq("username", _user).execute()
-        _email_guardado = (_res_onb_email.data[0].get("email") or "") if _res_onb_email.data else ""
+        # Verificar si el usuario ya tiene email guardado, y traer la edad que ya
+        # dio en el registro (no se le vuelve a preguntar aquí para no duplicar
+        # la pregunta de "¿cuántos años tienes?").
+        _res_onb_datos = supabase_client.table("usuarios").select("email, edad").eq("username", _user).execute()
+        _email_guardado = (_res_onb_datos.data[0].get("email") or "") if _res_onb_datos.data else ""
+        _edad_registro = (_res_onb_datos.data[0].get("edad") if _res_onb_datos.data else None)
 
         nombre_onboarding = st.text_input(
             "¿Cómo te llamas?",
@@ -4028,13 +4090,6 @@ elif st.session_state.page == "onboarding":
         else:
             email_onboarding = _email_guardado
 
-        edad_onboarding = st.number_input(
-            "¿Cuántos años tienes?",
-            min_value=14, max_value=99,
-            value=st.session_state.get("perfil_edad") or 17,
-            step=1,
-            key="onb_edad",
-        )
         carreras_onboarding = st.multiselect(
             "¿Qué carrera(s) te interesan?",
             options=[
@@ -4048,6 +4103,23 @@ elif st.session_state.page == "onboarding":
             key="onb_carreras",
             help="Puedes elegir más de una si todavía no decides.",
         )
+        st.markdown(
+            "<p style='font-size:0.82rem;color:#999;margin:-6px 0 8px;'>"
+            "¿Todavía no tienes idea de qué carrera te interesa? Hugo te ayuda a descubrirlo."
+            "</p>",
+            unsafe_allow_html=True,
+        )
+        if st.button("🧭 Aún no sé, quiero hacer el test vocacional", key="onb_aun_no_se"):
+            st.session_state.perfil_nombre = nombre_onboarding
+            st.session_state.perfil_edad = _edad_registro
+            st.session_state.perfil_carreras = carreras_onboarding
+            if not _email_guardado and isinstance(email_onboarding, str) and email_onboarding.strip():
+                supabase_client.table("usuarios").update(
+                    {"email": email_onboarding.strip()}
+                ).eq("username", _user).execute()
+            guardar_datos_usuario(_user)
+            st.toast("¡Vamos! Al terminar el test podrás volver a completar tu perfil.")
+            cambiar_pagina("orientacion")
         unis_onboarding = st.multiselect(
             "¿A qué universidades te interesaría aplicar?",
             options=list(UNIVERSIDADES_DATA.keys()),
@@ -4080,7 +4152,7 @@ elif st.session_state.page == "onboarding":
                 st.error("El correo electrónico no tiene un formato válido.")
             else:
                 st.session_state.perfil_nombre = nombre_onboarding
-                st.session_state.perfil_edad = int(edad_onboarding)
+                st.session_state.perfil_edad = _edad_registro
                 st.session_state.perfil_carreras = carreras_onboarding
                 st.session_state.perfil_universidades_interes = unis_onboarding
                 st.session_state.perfil_preparatoria = preparatoria_onboarding
