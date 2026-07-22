@@ -7,3 +7,4 @@ supabase
 stripe
 resend
 altair
+google-genai

@@ -1373,7 +1373,103 @@ def construir_contexto_universidades(universidades_interes=None):
     return "\n\n".join(bloques)
 
 
-# Nombres legibles de cada documento "tipo locker" (para armar las carpetas por universidad)
+# --- BÚSQUEDA EN TIEMPO REAL (Grounding con Google Search) ---
+# Objetivo: la BASE DE CONOCIMIENTO VERIFICADA de arriba es estática (se
+# actualiza a mano). Cuando un alumno pregunta específicamente por fechas o
+# proceso de una universidad, en vez de arriesgarnos a que ese dato esté
+# desactualizado, hacemos UNA búsqueda real en internet solo para ese mensaje.
+#
+# Por qué no scrapear cada sitio de universidad directamente: cada sitio
+# cambia de estructura HTML seguido (mantenimiento infinito), y en vez de eso
+# usamos el "Grounding con Google Search" que ya trae la API de Gemini: es
+# Google el que busca y regresa resultados con fuente citada, nosotros no
+# descargamos ni parseamos HTML ajeno directamente. Requiere el SDK nuevo
+# "google-genai" (el viejo "google.generativeai" no lo soporta bien para
+# gemini-2.5-flash) — agrégalo a requirements.txt: `google-genai`.
+#
+# Por qué NO se activa en cada mensaje: el grounding se cobra aparte, por
+# prompt, además del costo normal de tokens. Por eso solo se dispara cuando
+# el mensaje del alumno (a) menciona algo de fechas/plazos/proceso Y (b) se
+# puede identificar una universidad específica (mencionada en el mensaje, o
+# la única que el alumno tiene marcada como interés).
+import re as _re_hugo_busqueda
+
+_PATRON_FECHA_PROCESO = _re_hugo_busqueda.compile(
+    r"\b(fecha|fechas|cu[aá]ndo|calendario|plazo|plazos|vence|vencimiento|"
+    r"l[ií]mite|inscripci[oó]n|inscribirse|registro|convocatoria|"
+    r"proceso de admisi[oó]n|cu[aá]nto tiempo|este (a[ñn]o|ciclo|semestre)|"
+    r"20(2[5-9]|3\d))\b",
+    _re_hugo_busqueda.IGNORECASE,
+)
+
+
+def detectar_necesidad_busqueda_tiempo_real(texto_alumno, universidades_interes=None):
+    """
+    Devuelve el nombre de la universidad a investigar si el mensaje amerita
+    una búsqueda en tiempo real, o None si no aplica (la mayoría de los casos
+    — así evitamos el costo extra del grounding en cada mensaje).
+    """
+    if not texto_alumno or not _PATRON_FECHA_PROCESO.search(texto_alumno):
+        return None
+
+    texto_low = texto_alumno.lower()
+    # 1) ¿el alumno menciona una universidad de la base de datos explícitamente?
+    for nombre in UNIVERSIDADES_DATA.keys():
+        if nombre.lower() in texto_low:
+            return nombre
+
+    # 2) si no la nombró pero tiene UNA sola universidad de interés marcada
+    # en su perfil, asumimos que es sobre esa (evita falsos positivos si
+    # tiene varias, ahí mejor no adivinar).
+    universidades_interes = universidades_interes or []
+    if len(universidades_interes) == 1:
+        return universidades_interes[0]
+
+    return None
+
+
+def buscar_info_actualizada_universidad(universidad, pregunta_alumno):
+    """
+    Hace UNA llamada a Gemini con Grounding con Google Search para traer
+    información reciente sobre fechas/proceso de admisión de una universidad
+    puntual. Si algo falla (sin SDK instalado, sin cuota, sin internet, etc.)
+    regresa None y Hugo simplemente sigue con su base de conocimiento
+    estática de respaldo — nunca debe tronar el chat por esto.
+    """
+    try:
+        from google import genai as genai_nuevo
+        from google.genai import types as genai_types
+
+        cliente_busqueda = genai_nuevo.Client(api_key=st.secrets["GEMINI_API_KEY"])
+        herramienta_busqueda = genai_types.Tool(google_search=genai_types.GoogleSearch())
+
+        prompt_busqueda = (
+            f"Busca información oficial y actualizada (2025-2026) sobre el "
+            f"proceso de admisión de '{universidad}' en México, en relación "
+            f"con esta pregunta de un aspirante a licenciatura: "
+            f"\"{pregunta_alumno}\"\n\n"
+            f"Enfócate en fechas, plazos, calendario o requisitos de "
+            f"proceso. Responde en español, en 3-5 líneas, mencionando de "
+            f"qué fuente sale cada dato (nombre del sitio, no la URL "
+            f"completa). Si no encuentras el dato exacto, dilo explícitamente "
+            f"en vez de inventarlo."
+        )
+
+        respuesta = cliente_busqueda.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt_busqueda,
+            config=genai_types.GenerateContentConfig(
+                tools=[herramienta_busqueda],
+                temperature=1.0,  # recomendado por Google para resultados con grounding
+            ),
+        )
+        texto = (respuesta.text or "").strip()
+        return texto or None
+    except Exception:
+        # No interrumpir el chat por esto: Hugo sigue con la base estática.
+        return None
+
+
 DOCUMENTOS_LOCKER_INFO = {
     "kardex":         {"label": "Kárdex / Certificado",          "tipo": "académico"},
     "ensayo":         {"label": "Ensayo / Carta de motivos",     "tipo": "académico"},
@@ -4714,6 +4810,28 @@ elif st.session_state.page == "chat":
                             "estudiar o qué se le daría bien, en vez de dar una respuesta genérica."
                         )
 
+                    # --- BÚSQUEDA EN TIEMPO REAL (solo si el mensaje lo amerita) ---
+                    # Ver detectar_necesidad_busqueda_tiempo_real: solo se dispara con
+                    # preguntas de fechas/proceso sobre una universidad identificable,
+                    # para no pagar el costo de grounding en cada mensaje del chat.
+                    _uni_a_investigar = detectar_necesidad_busqueda_tiempo_real(
+                        prompt_chat, st.session_state.get("perfil_universidades_interes", [])
+                    )
+                    if _uni_a_investigar:
+                        with st.spinner(f"Consultando información reciente de {_uni_a_investigar}..."):
+                            _info_reciente = buscar_info_actualizada_universidad(_uni_a_investigar, prompt_chat)
+                        if _info_reciente:
+                            partes_contexto.append(
+                                f"--- INFORMACIÓN RECIENTE DE INTERNET SOBRE {_uni_a_investigar.upper()} "
+                                f"(vía Google Search, consultada en el momento de esta pregunta) ---\n"
+                                f"{_info_reciente}\n\n"
+                                f"Esta información es más reciente que la BASE DE CONOCIMIENTO "
+                                f"VERIFICADA de arriba en cuanto a fechas y proceso — dale prioridad "
+                                f"para esos datos puntuales, pero acláraselo al alumno como algo que "
+                                f"conviene confirmar en el sitio oficial de la universidad antes de "
+                                f"tomarlo como definitivo."
+                            )
+
                     info_doc = ""
                     if partes_contexto:
                         info_doc = "\n\n[CONTEXTO DEL ALUMNO]\n" + "\n\n".join(partes_contexto)
@@ -4749,6 +4867,10 @@ elif st.session_state.page == "chat":
                             "4. Si te preguntan sobre una universidad que no está en tu base de "
                             "conocimiento, dilo explícitamente y ofrece ayudar con lo que sí tienes "
                             "verificado, en vez de inventar cifras.\n"
+                            "4bis. Si el contexto trae un bloque de 'INFORMACIÓN RECIENTE DE INTERNET', "
+                            "esa información es más actual que la base de conocimiento estática para "
+                            "fechas y proceso — dale prioridad ahí, pero siempre acláraselo al alumno "
+                            "como algo a confirmar en el sitio oficial de la universidad.\n"
                             "5. Si el contexto trae 'PROBABILIDADES YA CALCULADAS EN EL SIMULADOR', "
                             "úsalas tal cual cuando te pregunten por probabilidades de admisión — no "
                             "pidas de nuevo el perfil del alumno ni inventes un número distinto.\n"
