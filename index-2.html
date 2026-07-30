@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uniwebmx - Admisiones Inteligentes con IA</title>
+<meta name="description" content="Organiza tus documentos, platica con Hugo (tu asesor de admisiones con IA) y simula tus probabilidades de ingreso por universidad. Empieza gratis.">
+<link rel="canonical" href="https://uniwebmx.com/">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Uniwebmx - Admisiones Inteligentes con IA">
+<meta property="og:description" content="Organiza tus documentos, platica con Hugo (tu asesor de admisiones con IA) y simula tus probabilidades de ingreso por universidad. Empieza gratis.">
+<meta property="og:url" content="https://uniwebmx.com/">
+<meta property="og:image" content="https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/logo.png">
+<meta property="og:locale" content="es_MX">
+<meta name="twitter:card" content="summary">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "Uniwebmx",
+  "url": "https://uniwebmx.com",
+  "logo": "https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/logo.png",
+  "description": "Plataforma gratuita para estudiantes mexicanos que organiza documentos de admisión, ofrece un asesor con IA (Hugo) y simula probabilidades de ingreso por universidad.",
+  "areaServed": "MX"
+}
+</script>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background-color: #FFFFFF;
+    color: #1A1A1A;
+  }
+  body, button, p, span, a, h1, h2, h3, div {
+    font-family: 'Montserrat', sans-serif;
+  }
+  img { max-width: 100%; display: block; }
+  a { text-decoration: none; }
+
+  .wrap {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 5rem;
+  }
+
+  h1 { font-weight: 700; color: #1A1A1A; letter-spacing: -0.03em; margin: 0 0 1.5rem; }
+  h2 { font-weight: 700; color: #1A1A1A; margin: 0; }
+  h3 { font-weight: 600; color: #4A5D32; margin: 0 0 12px; }
+
+  /* ---------- nav ---------- */
+  .navbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 0 10px;
+  }
+  .nav-left { display: flex; align-items: center; gap: 28px; }
+  .nav-left img { max-height: 28px; }
+  .nav-left a.nav-link {
+    font-size: 0.9rem; font-weight: 500; color: #1A1A1A;
+  }
+  .nav-link.disabled { opacity: 0.5; pointer-events: none; }
+  .nav-right { display: flex; align-items: center; gap: 8px; }
+  .btn-login {
+    font-size: 0.85rem; font-weight: 500; color: #1A1A1A;
+    padding: 7px 16px; border: 0.5px solid #DCDCDC; border-radius: 6px; white-space: nowrap;
+  }
+  .btn-register {
+    font-size: 0.85rem; font-weight: 500; color: #FFFFFF;
+    padding: 7px 16px; background: #4A5D32; border-radius: 6px; white-space: nowrap;
+  }
+
+  /* ---------- hero ---------- */
+  .hero-section-inicio {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.75)), url('fondo_hero.png');
+    background-size: cover;
+    background-position: center;
+    padding: 7rem 4rem 8rem;
+    text-align: center;
+    margin-top: 0.5rem;
+    margin-bottom: 4rem;
+  }
+  .hero-section-inicio h1 {
+    font-size: 3.5rem; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto;
+  }
+  .hero-section-inicio p {
+    font-size: 1.35rem; color: #1A1A1A; max-width: 850px; margin: 0 auto;
+    line-height: 1.6; font-weight: 400; opacity: 0.9;
+  }
+  .hero-green-btn {
+    display: inline-block;
+    background-color: #4A5D32;
+    color: white;
+    font-weight: 600;
+    font-size: 1rem;
+    padding: 14px 38px;
+    border-radius: 4px;
+    margin-top: 2.5rem;
+  }
+
+  h2.section-title { text-align: center; margin-top: 1rem; margin-bottom: 2.5rem; font-size: 2rem; }
+
+  /* ---------- carrusel continuo ---------- */
+  .uw-carrusel-viewport {
+    overflow: hidden;
+    background-color: #FAFAF8;
+    border-radius: 10px;
+    padding: 2rem 0;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+  }
+  .uw-carrusel-track {
+    display: flex;
+    gap: 18px;
+    width: max-content;
+    animation: uw-scroll 42s linear infinite;
+  }
+  .uw-carrusel-track:hover { animation-play-state: paused; }
+  @keyframes uw-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  .uw-slide {
+    flex-shrink: 0;
+    width: 320px;
+    height: 220px;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+    background-size: cover;
+    background-position: center;
+  }
+  .uw-slide-overlay {
+    position: absolute; inset: 0;
+    background: linear-gradient(0deg, rgba(20,24,14,0.75) 0%, rgba(20,24,14,0.15) 55%, rgba(20,24,14,0) 75%);
+  }
+  .uw-slide-text { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 20px; }
+  .uw-slide-text .titulo { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+  .uw-slide-text .desc { font-size: 12px; color: rgba(255,255,255,0.85); line-height: 1.5; }
+  .uw-carrusel-caption { text-align: center; font-size: 11px; color: #999; margin-top: 14px; }
+
+  /* ---------- quienes somos / mision ---------- */
+  .divider {
+    border: none; border-top: 1px solid #EAEAEA; margin: 4rem 0 3rem;
+  }
+  .somos-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-bottom: 4rem;
+  }
+  .uw-somos-icon {
+    width: 34px; height: 34px; border-radius: 8px;
+    background: #EEF1E9;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 12px;
+  }
+  .somos-grid p { color: #444444; line-height: 1.7; font-size: 1.05rem; margin: 0; }
+
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid #EAEAEA; padding: 2rem 0 3rem; }
+  .foot-row {
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;
+  }
+  .foot-row p { font-size: 0.82rem; color: #666; margin: 0; }
+  .foot-links { display: flex; gap: 22px; }
+  .foot-links a { font-size: 0.82rem; color: #666; }
+  .foot-links a:hover { color: #4A5D32; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .uw-carrusel-track { animation: none !important; }
+  }
+
+  @media (max-width: 768px) {
+    .wrap { padding: 0 1.25rem; }
+    .hero-section-inicio { padding: 3rem 1.25rem; margin-left: -1.25rem; margin-right: -1.25rem; }
+    .hero-section-inicio h1 { font-size: 1.9rem; line-height: 1.3; }
+    .hero-section-inicio p { font-size: 1rem; line-height: 1.55; }
+    .hero-green-btn { padding: 12px 26px; font-size: 0.9rem; }
+    .uw-slide { width: 220px; height: 160px; }
+    .nav-left { gap: 16px; }
+    .somos-grid { grid-template-columns: 1fr; gap: 2rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav class="navbar">
+    <div class="nav-left">
+      <a href="https://app.uniwebmx.com" rel="nofollow">
+        <img src="https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/logo.png" alt="Uniwebmx">
+      </a>
+      <a class="nav-link" href="https://app.uniwebmx.com/?page=ranking" rel="nofollow">Ranking</a>
+      <a class="nav-link" href="https://app.uniwebmx.com/?page=blog" rel="nofollow">Blog</a>
+      <a class="nav-link disabled" href="#">Comunidad</a>
+    </div>
+    <div class="nav-right">
+      <a class="btn-login" href="https://app.uniwebmx.com/?page=login" rel="nofollow">Iniciar sesión</a>
+      <a class="btn-register" href="https://app.uniwebmx.com/?page=registro" rel="nofollow">Registrarse</a>
+    </div>
+  </nav>
+</div>
+
+<div class="hero-section-inicio">
+  <h1>Simplifica tu aplicación universitaria en un solo lugar.</h1>
+  <p>
+    Una plataforma inteligente diseñada para guiarte en tu ingreso a las mejores instituciones de México.
+    Controla tus documentos, mide tus posibilidades y redacta perfiles de éxito con asistencia experta.
+  </p>
+  <a class="hero-green-btn" href="https://app.uniwebmx.com/?page=login" rel="nofollow">Comienza tu viaje</a>
+</div>
+
+<div class="wrap">
+  <h2 class="section-title">Herramientas diseñadas para tu admisión</h2>
+
+  <div class="uw-carrusel-viewport">
+    <div class="uw-carrusel-track">
+
+      <div class="uw-slide" style="background-image:url('https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/fondo_carrusel_locker.jpg'), linear-gradient(135deg,#5C6B4A,#7C8A6A);">
+        <div class="uw-slide-overlay"></div>
+        <div class="uw-slide-text"><div class="titulo">Locker digital</div><div class="desc">Kárdex, ensayos y diplomas en un solo lugar.</div></div>
+      </div>
+      <div class="uw-slide" style="background-image:url('https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/fondo_carrusel_consultor.jpg'), linear-gradient(135deg,#6B5D3F,#8C7B54);">
+        <div class="uw-slide-overlay"></div>
+        <div class="uw-slide-text"><div class="titulo">Consultor IA</div><div class="desc">Retroalimentación en tiempo real de Hugo.</div></div>
+      </div>
+      <div class="uw-slide" style="background-image:url('https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/fondo_carrusel_simulador.jpg'), linear-gradient(135deg,#4A5A5C,#6B8083);">
+        <div class="uw-slide-overlay"></div>
+        <div class="uw-slide-text"><div class="titulo">Simulador estadístico</div><div class="desc">Tus probabilidades reales de aceptación.</div></div>
+      </div>
+
+      <!-- se repite para el loop continuo -->
+      <div class="uw-slide" style="background-image:url('https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/fondo_carrusel_locker.jpg'), linear-gradient(135deg,#5C6B4A,#7C8A6A);">
+        <div class="uw-slide-overlay"></div>
+        <div class="uw-slide-text"><div class="titulo">Locker digital</div><div class="desc">Kárdex, ensayos y diplomas en un solo lugar.</div></div>
+      </div>
+      <div class="uw-slide" style="background-image:url('https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/fondo_carrusel_consultor.jpg'), linear-gradient(135deg,#6B5D3F,#8C7B54);">
+        <div class="uw-slide-overlay"></div>
+        <div class="uw-slide-text"><div class="titulo">Consultor IA</div><div class="desc">Retroalimentación en tiempo real de Hugo.</div></div>
+      </div>
+      <div class="uw-slide" style="background-image:url('https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/fondo_carrusel_simulador.jpg'), linear-gradient(135deg,#4A5A5C,#6B8083);">
+        <div class="uw-slide-overlay"></div>
+        <div class="uw-slide-text"><div class="titulo">Simulador estadístico</div><div class="desc">Tus probabilidades reales de aceptación.</div></div>
+      </div>
+
+    </div>
+  </div>
+  <div class="uw-carrusel-caption">pasa el mouse encima para pausar</div>
+
+  <hr class="divider">
+
+  <div class="somos-grid">
+    <div>
+      <div class="uw-somos-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A5D32" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </div>
+      <h2>Quiénes Somos</h2>
+      <p>
+        Somos un equipo interdisciplinario apasionado por democratizar y optimizar el acceso a la educación superior en México.
+        Creamos tecnología con un enfoque humano para dotar a los estudiantes de herramientas de análisis y edición que antes eran exclusivas de consultorías privadas.
+      </p>
+    </div>
+    <div>
+      <div class="uw-somos-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4A5D32" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+        </svg>
+      </div>
+      <h2>Nuestra Misión</h2>
+      <p>
+        Transformar los procesos de admisión universitaria en experiencias claras, organizadas y equitativas.
+        Buscamos potenciar las capacidades de cada aspirante, ayudándoles a estructurar sus logros y perfiles para maximizar su aceptación en las instituciones de sus sueños.
+      </p>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap foot-row">
+    <p>© 2026 Uniwebmx. Todos los derechos reservados.</p>
+    <div class="foot-links">
+      <a href="https://app.uniwebmx.com/?page=aviso_privacidad" rel="nofollow">Aviso de Privacidad</a>
+      <a href="https://app.uniwebmx.com/?page=terminos" rel="nofollow">Términos y Condiciones</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
