@@ -1789,6 +1789,10 @@ st.markdown(f"""
    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght=400;500;600;700&display=swap');
    @import url('https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/tabler-icons.min.css');
 
+   * {{
+       box-sizing: border-box !important;
+   }}
+
    /* La fuente Material Symbols que usa Streamlit internamente (file_uploader,
       expander, etc.) no carga en este entorno y muestra el nombre del icono
       como texto crudo encimado. Mientras eso se resuelve, lo ocultamos para
@@ -1839,6 +1843,14 @@ st.markdown(f"""
        opacity: 1 !important;
        z-index: 999999 !important;
    }}
+   [data-testid="collapsedControl"] button {{
+       background-color: #4A5D32 !important;
+       color: white !important;
+       border-radius: 50% !important;
+       width: 40px !important;
+       height: 40px !important;
+       box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+   }}
    /* Al quitar el header, recuperamos el espacio que dejaba arriba.
       OJO: -3.5rem tapaba la parte superior de la barra de navegación
       propia (logo, Ranking, Blog, Comunidad). Ya no compensamos ese
@@ -1860,6 +1872,9 @@ st.markdown(f"""
 
    .stApp {{
        background-color: #FFFFFF;
+   }}
+   body {{
+       overflow-x: hidden !important;
    }}
    .block-container {{
        padding-top: 1rem !important;
