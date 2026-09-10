@@ -112,6 +112,10 @@ elif st.session_state.page == "panel_chat" and auth_core.es_universidad(st.sessi
 es_hub = st.session_state.page in ["locker", "chat", "simulador", "mi_aplicacion", "mensajes", "orientacion"]
 es_panel = st.session_state.page in PANEL_ADMIN_PAGES
 
+# Render the sidebar if logged in
+if st.session_state.get("logged_in"):
+    components.render_sidebar()
+
 # --- BUCLE DE RUTEO PRINCIPAL ---
 page = st.session_state.page
 

@@ -286,3 +286,42 @@ def apply_custom_css(bg_inicio, bg_locker):
        }}
        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
     """, unsafe_allow_html=True)
+
+def render_sidebar():
+    """Renders the application sidebar for logged-in users."""
+    if not st.session_state.get("logged_in"):
+        return
+
+    with st.sidebar:
+        # User Profile Section
+        user_name = st.session_state.get("perfil_nombre", st.session_state.get("user", "Usuario"))
+        st.markdown(f"""
+        <div style="padding: 1rem 0; border-bottom: 1px solid #EAEAEA; margin-bottom: 2rem;">
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 0;">Bienvenido,</p>
+            <h2 style="font-size: 1.2rem; color: #1A1A1A; margin: 0; font-weight: 600;">{user_name}</h2>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Navigation Menu
+        st.markdown("<p style='font-size: 0.7rem; font-weight: 700; color: #AAA; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 1rem;'>Menú Principal</p>", unsafe_allow_html=True)
+
+        nav_items = [
+            ("Locker Digital", "locker", "📁"),
+            ("Consultor AI", "chat", "🤖"),
+            ("Simulador Estadístico", "simulador", "📊"),
+            ("Mi Aplicación", "mi_aplicacion", "📝"),
+            ("Mensajes", "mensajes", "✉️"),
+            ("Orientación Vocacional", "orientacion", "🎯"),
+        ]
+
+        for label, page_id, icon in nav_items:
+            if st.button(f"{icon} {label}", key=f"nav_{page_id}", use_container_width=True):
+                st.session_state.page = page_id
+                st.rerun()
+
+        # Logout Button
+        st.markdown("<div style='margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #EAEAEA;'></div>", unsafe_allow_html=True)
+        if st.button("Cerrar Sesión", key="logout_btn", use_container_width=True):
+            # Redirect to logout target
+            st.query_params["nav"] = "__logout__"
+            st.rerun()

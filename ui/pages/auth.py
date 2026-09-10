@@ -7,39 +7,46 @@ from datetime import datetime, timedelta, timezone
 import secrets
 
 def render_login():
-    st.markdown("<h1 style='font-size: 3.5rem; font-weight: 400; color: #333333; margin-bottom: 2.5rem;'>Login</h1>", unsafe_allow_html=True)
+    col_img, col_form = st.columns([1.1, 0.9], gap="large")
+    with col_img:
+        # handled by CSS and background images in app.py/components.py
+        st.markdown('<div class="auth-img-box"></div>', unsafe_allow_html=True)
 
-    with st.form("login_form"):
-        username = st.text_input("Usuario")
-        password = st.text_input("Contraseña", type="password")
-        submit = st.form_submit_button("Iniciar Sesión")
+    with col_form:
+        st.markdown("<div style='padding-top: 40px;'></div>", unsafe_allow_html=True)
+        st.markdown("<h1 style='font-size: 3.5rem; font-weight: 400; color: #333333; margin-bottom: 2.5rem;'>Login</h1>", unsafe_allow_html=True)
 
-        if submit:
-            if not username or not password:
-                st.error("Por favor, ingresa tu usuario y contraseña.")
-                return
+        with st.form("login_form"):
+            username = st.text_input("Usuario")
+            password = st.text_input("Contraseña", type="password")
+            submit = st.form_submit_button("Iniciar Sesión")
 
-            if cuenta_bloqueada(username):
-                st.error("Cuenta bloqueada temporalmente por demasiados intentos fallidos. Intenta más tarde.")
-                return
+            if submit:
+                if not username or not password:
+                    st.error("Por favor, ingresa tu usuario y contraseña.")
+                    return
 
-            if verify_user(username, password):
-                resetear_intentos_fallidos(username)
-                from core.auth import crear_sesion_token
-                from core.database import restaurar_sesion_usuario
+                if cuenta_bloqueada(username):
+                    st.error("Cuenta bloqueada temporalmente por demasiados intentos fallidos. Intenta más tarde.")
+                    return
 
-                token = crear_sesion_token(username)
-                st.session_state.logged_in = True
-                st.session_state.user = username
-                st.session_state.session_token = token
-                restaurar_sesion_usuario(username)
-                st.session_state.page = "locker"
-                st.rerun()
-            else:
-                registrar_intento_fallido(username)
-                st.error("Usuario o contraseña incorrectos.")
+                if verify_user(username, password):
+                    resetear_intentos_fallidos(username)
+                    from core.auth import crear_sesion_token
+                    from core.database import restaurar_sesion_usuario
 
-    st.markdown('<div class="auth-redirect-text">¿No tienes cuenta? <a href="/?page=registro" target="_self" style="color:#4A5D32;font-weight:600;text-decoration:none;">Regístrate aquí</a></div>', unsafe_allow_html=True)
+                    token = crear_sesion_token(username)
+                    st.session_state.logged_in = True
+                    st.session_state.user = username
+                    st.session_state.session_token = token
+                    restaurar_sesion_usuario(username)
+                    st.session_state.page = "locker"
+                    st.rerun()
+                else:
+                    registrar_intento_fallido(username)
+                    st.error("Usuario o contraseña incorrectos.")
+
+        st.markdown('<div class="auth-redirect-text">¿No tienes cuenta? <a href="/?page=registro" target="_self" style="color:#4A5D32;font-weight:600;text-decoration:none;">Regístrate aquí</a></div>', unsafe_allow_html=True)
 
 def render_registro():
     col_img, col_form = st.columns([1.1, 0.9], gap="large")
