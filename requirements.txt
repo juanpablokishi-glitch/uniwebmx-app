@@ -1,0 +1,10 @@
+streamlit
+pandas
+google-generativeai
+PyPDF2
+bcrypt
+supabase
+stripe
+resend
+altair
+google-genai
