@@ -14,18 +14,9 @@ def render_locker():
         st.warning("Tu Locker Digital está temporalmente desactivado. Una vez que tu tutor confirme la cuenta vía correo, podrás subir y guardar tus documentos aquí.")
         return
 
-    # Tab layout: Academic vs Personal
-    tab_acad, tab_pers = st.tabs(["📚 Documentos Académicos", "🆔 Documentos Personales"])
-
-    with tab_acad:
-        for key, info in DOCUMENTOS_LOCKER_INFO.items():
-            if info["tipo"] == "académico":
-                render_document_slot(username, key, info["label"])
-
-    with tab_pers:
-        for key, info in DOCUMENTOS_LOCKER_INFO.items():
-            if info["tipo"] == "personal":
-                render_document_slot(username, key, info["label"])
+    # Render academic documents
+    for key, info in DOCUMENTOS_LOCKER_INFO.items():
+        render_document_slot(username, key, info["label"])
 
     # Export All Academic Documents
     st.markdown("---")

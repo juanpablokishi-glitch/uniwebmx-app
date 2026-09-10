@@ -124,28 +124,6 @@ def render_blog():
     <div style="max-width:860px;margin:0 auto;padding-top:2rem;">
         <p style="font-size:0.8rem;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#4A5D32;margin-bottom:0.5rem;">Recursos</p>
         <h1 style="font-size:2.8rem;font-weight:700;color:#1A1A1A;letter-spacing:-0.03em;margin-bottom:0.5rem;">Blog de Admisiones</h1>
-        <p style="font-size:1.1rem;color:#666666;line-height:1.7;margin-bottom:3rem;">Guías, datos reales y estrategias para mejorar tus probabilidades de ingreso.</p>
+        <p style="font-size:1.1rem;color:#666666;line-height:1.7;margin-bottom:3rem;">Estamos preparando contenido valioso para ayudarte en tu camino. ¡Vuelve pronto!</p>
     </div>
     """, unsafe_allow_html=True)
-
-    articulos = [
-        {"tag": "Examen de admisión", "titulo": "Cómo prepararte para el examen de la UNAM en 2026", "resumen": "El examen consta de 120 reactivos de opción múltiple en 9 materias, divididos en 4 áreas según tu carrera. La clave no es estudiar todo: es identificar las materias con más reactivos en tu área y atacarlas primero. Empieza al menos 4 meses antes, usa simulacros semanales y descarga la guía oficial en dgae.unam.mx al momento de registrarte.", "minutos": "5 min", "datos": ["120 reactivos · 3 horas", "4 áreas de conocimiento", "Tasa de aceptación: ~9%"]},
-        {"tag": "Costos", "titulo": "Cuánto cuesta realmente estudiar en las universidades privadas top de México", "resumen": "Muchos aspirantes se enfocan en la colegiatura pero olvidan los gastos asociados. En el Tec de Monterrey el semestre va de $155k a $189k MXN dependiendo del campus, pero hay que sumar seguro médico, materiales y, si te mudas, aproximadamente $6,400 mensuales en vivienda. La UP es técnicamente la más cara del país en 2026 con $177k por semestre, mientras que UAG es de las opciones privadas más accesibles en Guadalajara, con semestres desde $27k MXN según la carrera.", "minutos": "4 min", "datos": ["UP: $177k/sem (la más cara)", "Tec: $155k–$189k/sem", "UdeG y UNAM: prácticamente gratuitas"]},
-        {"tag": "Estrategia", "titulo": "Qué buscan realmente las universidades en tu expediente", "resumen": "Las privadas top valoran tres cosas sobre todo: consistencia académica (no perfección, sino tendencia), actividades extracurriculares con compromiso real (no una lista de logros de una sola vez), y un ensayo personal que conecte tu historia con tu carrera elegida. En el Tec, el PAA pesa mucho; en la UAG, la autobiografía es parte central del expediente. Conocer la fórmula de cada universidad te permite enfocar tus energías correctamente.", "minutos": "6 min", "datos": ["UAG: autobiografía + PAA", "Tec: PAA mínimo 1,320 pts", "UNAM: solo aciertos, sin promedio"]},
-        {"tag": "Guía", "titulo": "UdeG vs UNAM: ¿cuál es la mejor pública para estudiar en Jalisco?", "resumen": "Ambas son gratuitas y prestigiosas, pero muy diferentes. La UNAM tiene mayor reconocimiento internacional (posición #145 QS vs #1001–1200 de UdeG), pero sus campus están principalmente en CDMX. La UdeG es la segunda más grande de México con más de 100,000 estudiantes y una tasa de aceptación del 34.5% — mucho más accesible que el 9% de la UNAM. Si vives en Guadalajara o el Bajío, la UdeG es una opción sólida sin necesidad de mudarte.", "minutos": "5 min", "datos": ["UNAM: #145 QS mundial", "UdeG: +100,000 estudiantes", "UdeG acepta 34.5% vs 9% UNAM"]},
-        {"tag": "Becas", "titulo": "Cómo conseguir beca en el Tec de Monterrey", "resumen": "El Tec ofrece becas por talento académico, atlético, artístico, liderazgo y emprendimiento. La beca socioeconómica cubre entre el 5% y el 25% de la colegiatura y casi siempre viene combinada con un préstamo educativo del mismo porcentaje, que se paga después de graduarte en máximo 1.5 veces la duración de la carrera. El ITAM otorga becas a fondo perdido a aproximadamente el 30% de sus estudiantes.", "minutos": "4 min", "datos": ["Becas del 5% al 70%", "Préstamo educativo post-graduación", "ITAM: 30% de alumnos con beca"]},
-    ]
-
-    for art in articulos:
-        datos_html = "".join([f'<span style="background:#F7F7F5;color:#444;font-size:0.75rem;padding:4px 10px;border-radius:8px;margin-right:6px;">{d}</span>' for d in art["datos"]])
-        st.markdown(f"""
-        <div style="padding:28px;border:1px solid #EAEAEA;border-radius:10px;margin-bottom:16px;background:#FFFFFF;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                <span style="background:#EEF1E9;color:#4A5D32;font-size:0.72rem;font-weight:600;padding:3px 10px;border-radius:12px;">{art['tag']}</span>
-                <span style="font-size:0.78rem;color:#AAAAAA;">{art['minutos']} de lectura</span>
-            </div>
-            <h3 style="font-size:1.2rem;font-weight:700;color:#1A1A1A;margin-bottom:10px;">{art['titulo']}</h3>
-            <p style="font-size:0.95rem;color:#555555;line-height:1.7;margin-bottom:14px;">{art['resumen']}</p>
-            <div>{datos_html}</div>
-        </div>
-        """, unsafe_allow_html=True)

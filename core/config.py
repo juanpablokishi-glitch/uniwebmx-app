@@ -22,6 +22,14 @@ BLOQUEO_MINUTOS = 15
 
 # Supabase Storage Bucket
 BUCKET = "locker-archivos"
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+PUBLIC_STORAGE_URL = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET}"
+
+# Carousel images in the public bucket
+carrusel_locker_url = f"{PUBLIC_STORAGE_URL}/fondo_carrusel_locker.png"
+carrusel_consultor_url = f"{PUBLIC_STORAGE_URL}/fondo_carrusel_consultor.png"
+carrusel_simulador_url = f"{PUBLIC_STORAGE_URL}/fondo_carrusel_simulador.png"
+carrusel_orientacion_url = f"{PUBLIC_STORAGE_URL}/fondo_carrusel_orientacion.png"
 
 # Admin Panel Pages
 PANEL_ADMIN_PAGES = [
@@ -72,7 +80,7 @@ UNIVERSIDADES_DATA = {
             "colegiatura": "Variable por campus/carrera — usar cotizador oficial del Tec",
         },
         "becas": ["Beca al Talento Académico (requiere PAA alto, varía por tipo)", "Becas socioeconómicas con préstamo educativo complementario"],
-        "notas_hugo": "El 'puntaje PAA mínimo' no es un corte único de admisión — los rangos de 1,000-1,360 que existen son requisitos de BECA, no de entrada. No los presentes como si fueran el mínimo para ser aceptado.",
+        "notas_hugo": "El 'puntaje PAA mínimo' no es un corte único de admisión — los rangos de 1,000-1,360 que existen son requisitos de BECA, no de entrada. No los presentes como si fueran el mínimo para ser acept도.",
     },
     "UdeG": {
         "promedio_min": 8.0,
@@ -272,6 +280,15 @@ ORIENTACION_CONV_PREGUNTAS = [
     "¿Qué tan importante es para ti el orden y tener todo bien organizado en tu día a día?",
     "Si pudieras ayudar a resolver un problema del mundo, ¿cuál elegirías y por qué?",
 ]
+
+# Re-adding DOCUMENTOS_LOCKER_INFO (Academic only)
+DOCUMENTOS_LOCKER_INFO = {
+    "kardex":         {"label": "Kárdex / Certificado",          "tipo": "académico"},
+    "ensayo":         {"label": "Ensayo / Carta de motivos",     "tipo": "académico"},
+    "curriculum":     {"label": "Currículum académico",          "tipo": "académico"},
+    "cartas":         {"label": "Cartas de recomendación",       "tipo": "académico"},
+    "portafolio":     {"label": "Portafolio / Extracurriculares","tipo": "académico"},
+}
 
 # URL base of the app
 BASE_URL = st.secrets.get("BASE_URL", "http://localhost:8501")

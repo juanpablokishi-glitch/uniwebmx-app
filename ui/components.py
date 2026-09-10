@@ -131,7 +131,25 @@ def apply_custom_css(bg_inicio, bg_locker):
        [data-testid="stToolbar"] {{ display: none !important; }}
        [data-testid="stDecoration"] {{ display: none !important; }}
        footer {{ visibility: hidden !important; display: none !important; }}
-       [data-testid="collapsedControl"] {{ display: flex !important; visibility: visible !important; opacity: 1 !important; z-index: 999999 !important; }}
+
+       /* Mobile Sidebar Button (FAB style) */
+       [data-testid="collapsedControl"] {{
+           display: flex !important;
+           visibility: visible !important;
+           opacity: 1 !important;
+           z-index: 999999 !important;
+           background: #4A5D32 !important;
+           border-radius: 50% !important;
+           width: 40px !important;
+           height: 40px !important;
+           justify-content: center !important;
+           align-items: center !important;
+           box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+       }}
+       [data-testid="collapsedControl"] button {{
+           color: white !important;
+       }}
+
        .stApp {{ margin-top: 0 !important; }}
        [data-testid="stAppViewContainer"] {{ padding-top: 0 !important; }}
        .stApp, button, p, span, a, h1, h2, h3, [data-testid="stSidebar"] {{ font-family: 'Montserrat', sans-serif !important; }}
@@ -179,7 +197,7 @@ def apply_custom_css(bg_inicio, bg_locker):
            [data-testid="stVerticalBlockBorderWrapper"] {{ padding: 1.25rem 1.25rem !important; }}
            .sidebar-bottom-bar {{ width: 100% !important; }}
            .profile-menu {{ width: min(85vw, 320px) !important; }}
-           [data-testid="collapsedControl"] {{ top: 6px !important; left: 6px !important; }}
+           [data-testid="collapsedControl"] {{ top: 10px !important; left: 10px !important; }}
        }}
        @media (max-width: 480px) {{
            h1 {{ font-size: 1.6rem !important; }}
@@ -238,5 +256,23 @@ def apply_custom_css(bg_inicio, bg_locker):
        [data-testid="stTabs"] [data-baseweb="tab-list"] {{ position: sticky !important; top: 3.5rem !important; background: #FFFFFF !important; z-index: 100 !important; }}
        div[data-testid="stChatInput"] {{ background-color: transparent !important; border: none !important; padding: 0 !important; overflow: visible !important; }}
        div[data-testid="stChatInput"] textarea {{ border-radius: 24px !important; }}
-    """
+
+       /* Custom Loading Animation */
+       .loading-circle {{
+           width: 40px; height: 40px;
+           border: 4px solid #f3f3f3;
+           border-top: 4px solid #4A5D32;
+           border-radius: 50%;
+           animation: spin 1s linear infinite;
+           margin: 20px auto;
+       }}
+       @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+    """, unsafe_allow_html=True)
+ !important; color: #1A1A1A !important; }}
+       .gemini-chat-container ::-moz-selection {{ background: rgba(74, 93, 50, 0.25) !important; color: #1A1A1A !important; }}
+       .gemini-chat-container, .gemini-chat-container * {{ outline: none !important; -webkit-tap-highlight-color: transparent !important; }}
+       .gemini-chat-container *:focus, .gemini-chat-container *:focus-visible, .gemini-chat-container *:active {{ outline: none !important; box-shadow: none !important; }}
+       [data-testid="stTabs"] [data-baseweb="tab-list"] {{ position: sticky !important; top: 3.5rem !important; background: #FFFFFF !important; z-index: 100 !important; }}
+       div[data-testid="stChatInput"] {{ background-color: transparent !important; border: none !important; padding: 0 !important; overflow: visible !important; }}
+       div[data-testid="stChatInput"] textarea {{ border-radius: 24px !important; }}
     """, unsafe_allow_html=True)
