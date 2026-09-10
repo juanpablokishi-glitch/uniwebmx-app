@@ -268,11 +268,3 @@ def apply_custom_css(bg_inicio, bg_locker):
        }}
        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
     """, unsafe_allow_html=True)
- !important; color: #1A1A1A !important; }}
-       .gemini-chat-container ::-moz-selection {{ background: rgba(74, 93, 50, 0.25) !important; color: #1A1A1A !important; }}
-       .gemini-chat-container, .gemini-chat-container * {{ outline: none !important; -webkit-tap-highlight-color: transparent !important; }}
-       .gemini-chat-container *:focus, .gemini-chat-container *:focus-visible, .gemini-chat-container *:active {{ outline: none !important; box-shadow: none !important; }}
-       [data-testid="stTabs"] [data-baseweb="tab-list"] {{ position: sticky !important; top: 3.5rem !important; background: #FFFFFF !important; z-index: 100 !important; }}
-       div[data-testid="stChatInput"] {{ background-color: transparent !important; border: none !important; padding: 0 !important; overflow: visible !important; }}
-       div[data-testid="stChatInput"] textarea {{ border-radius: 24px !important; }}
-    """, unsafe_allow_html=True)
