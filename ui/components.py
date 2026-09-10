@@ -4,16 +4,17 @@ import base64
 import json
 from core.config import BASE_URL
 
+def get_base64_image(path):
+    """Reads an image file and returns its base64 encoded string."""
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except FileNotFoundError:
+        return None
+
 def inject_pwa_and_seo(logo_path="logo_chrome.png"):
     """Injects PWA manifest and SEO meta tags into the page head via JS."""
-    def _pwa_encode_image(path):
-        try:
-            with open(path, "rb") as f:
-                return base64.b64encode(f.read()).decode()
-        except FileNotFoundError:
-            return None
-
-    logo_b64 = _pwa_encode_image(logo_path)
+    logo_b64 = get_base64_image(logo_path)
     if not logo_b64:
         return
 
