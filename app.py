@@ -112,10 +112,6 @@ elif st.session_state.page == "panel_chat" and auth_core.es_universidad(st.sessi
 es_hub = st.session_state.page in ["locker", "chat", "simulador", "mi_aplicacion", "mensajes", "orientacion"]
 es_panel = st.session_state.page in PANEL_ADMIN_PAGES
 
-# Aplicar visibilidad de sidebar via CSS dinámico (inyectando la regla específica)
-if not es_hub and not es_panel:
-    st.markdown("[data-testid='stSidebar'] {display: none;}")
-
 # --- BUCLE DE RUTEO PRINCIPAL ---
 page = st.session_state.page
 

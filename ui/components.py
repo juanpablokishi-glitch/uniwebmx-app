@@ -126,43 +126,24 @@ def apply_custom_css(bg_inicio, bg_locker):
        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght=400;500;600;700&display=swap');
        @import url('https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/tabler-icons.min.css');
 
-       [data-testid="stIconMaterial"] {{ display: none !important; }}
-       #MainMenu {{ visibility: hidden !important; display: none !important; }}
-       header[data-testid="stHeader"] {{ background: transparent !important; height: 3rem !important; }}
-       [data-testid="stToolbar"] {{ display: none !important; }}
-       [data-testid="stDecoration"] {{ display: none !important; }}
-       footer {{ visibility: hidden !important; display: none !important; }}
-
-       /* Mobile Sidebar Button (FAB style) */
-       [data-testid="collapsedControl"] {{
-           display: flex !important;
-           visibility: visible !important;
-           opacity: 1 !important;
-           z-index: 999999 !important;
-           background: #4A5D32 !important;
-           border-radius: 50% !important;
-           width: 40px !important;
-           height: 40px !important;
-           justify-content: center !important;
-           align-items: center !important;
-           box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
-       }}
-       [data-testid="collapsedControl"] button {{
-           color: white !important;
-       }}
-
+       /* General App Style */
        .stApp {{ margin-top: 0 !important; }}
        [data-testid="stAppViewContainer"] {{ padding-top: 0 !important; }}
        .stApp, button, p, span, a, h1, h2, h3, [data-testid="stSidebar"] {{ font-family: 'Montserrat', sans-serif !important; }}
        .stApp {{ background-color: #FFFFFF; }}
        .block-container {{ padding-top: 1rem !important; padding-bottom: 5rem !important; }}
+
+       /* Sidebar Styling */
        [data-testid="stSidebar"] {{ background-color: #FFFFFF !important; border-right: 0.5px solid #EAEAEA !important; }}
        [data-testid="stSidebar"] section[data-testid="stSidebarContent"] > div {{ padding: 0 !important; gap: 0 !important; }}
        [data-testid="stSidebar"] a:hover {{ background: #F5F5F3 !important; color: #1A1A1A !important; }}
+
+       /* Typography */
        h1 {{ font-weight: 700; color: #1A1A1A !important; letter-spacing: -0.03em; }}
        h2 {{ font-weight: 700; color: #1A1A1A !important; }}
        h3 {{ font-weight: 600; color: #4A5D32 !important; margin-bottom: 12px !important; margin-top: 0px !important; }}
 
+       /* Navigation Bar */
        .navbar-custom {{ display: flex; align-items: center; justify-content: space-between; padding: 10px 0; margin-bottom: 1rem; }}
        .nav-logo-link {{ font-weight: 700; color: #374337 !important; font-size: 1.8rem; letter-spacing: -0.04em; text-transform: lowercase; text-decoration: none !important; }}
        .nav-logo-link img {{ max-height: 45px; }}
@@ -172,11 +153,23 @@ def apply_custom_css(bg_inicio, bg_locker):
        .btn-login div.stButton button {{ background-color: transparent !important; color: #1A1A1A !important; border: 1px solid #EAEAEA !important; }}
        .btn-register div.stButton button {{ background-color: #4A5D32 !important; color: white !important; border: none !important; }}
 
-       .hero-section-inicio {{ background-image: {bg_inicio}; background-size: cover; background-position: center; padding: 7rem 4rem 8rem 4rem; text-align: center; margin-left: -5rem !important; margin-right: -5rem !important; margin-top: 0.5rem; margin-bottom: 4rem; width: calc(100% + 10rem); }}
-       .hero-section-locker {{ background-image: {bg_locker}; background-size: cover; background-position: center; padding: 6rem 4rem; text-align: center; margin-left: -5rem !important; margin-right: -5rem !important; margin-top: -1.6rem !important; margin-bottom: 4rem; width: calc(100% + 10rem); }}
+       /* Hero Sections - Full Bleed Hack */
+       .hero-section-inicio, .hero-section-locker {{
+           background-size: cover;
+           background-position: center;
+           text-align: center;
+           padding: 7rem 4rem;
+           margin-left: -5rem !important;
+           margin-right: -5rem !important;
+           width: calc(100% + 10rem);
+       }}
+       .hero-section-inicio {{ background-image: {bg_inicio}; margin-top: 0.5rem; margin-bottom: 4rem; }}
+       .hero-section-locker {{ background-image: {bg_locker}; margin-top: -1.6rem !important; margin-bottom: 4rem; }}
+
        .hero-green-btn {{ display: inline-block; background-color: #4A5D32 !important; color: white !important; font-weight: 600; font-size: 1rem; padding: 14px 38px; border-radius: 4px; text-decoration: none !important; margin-top: 2.5rem; }}
        .card-beneficio {{ background-color: #FFFFFF; padding: 2.5rem 2rem; border-radius: 6px; border: 1px solid #EAEAEA; height: 100%; }}
 
+       /* Carousel */
        .uw-carrusel-viewport {{ overflow: hidden; background-color: #FAFAF8; border-radius: 10px; padding: 2rem 0; -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); }}
        .uw-carrusel-track {{ display: flex; gap: 18px; width: max-content; animation: uw-scroll 42s linear infinite; }}
        .uw-carrusel-track:hover {{ animation-play-state: paused; }}
@@ -186,8 +179,14 @@ def apply_custom_css(bg_inicio, bg_locker):
        .uw-slide-text {{ position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 20px; }}
        .uw-somos-icon {{ width: 34px; height: 34px; border-radius: 8px; background: #EEF1E9; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }}
 
+       /* Mobile Responsiveness */
        @media (max-width: 768px) {{
-           .hero-section-inicio, .hero-section-locker {{ margin-left: -1rem !important; margin-right: -1rem !important; width: calc(100% + 2rem) !important; padding: 3rem 1.25rem !important; }}
+           .hero-section-inicio, .hero-section-locker {{
+               margin-left: -1rem !important;
+               margin-right: -1rem !important;
+               width: calc(100% + 2rem) !important;
+               padding: 3rem 1.25rem !important;
+           }}
            h1 {{ font-size: 1.9rem !important; line-height: 1.3 !important; }}
            .hero-section-inicio p, .hero-section-locker p {{ font-size: 1rem !important; line-height: 1.55 !important; }}
            .hero-green-btn {{ padding: 12px 26px !important; font-size: 0.9rem !important; }}
@@ -198,7 +197,22 @@ def apply_custom_css(bg_inicio, bg_locker):
            [data-testid="stVerticalBlockBorderWrapper"] {{ padding: 1.25rem 1.25rem !important; }}
            .sidebar-bottom-bar {{ width: 100% !important; }}
            .profile-menu {{ width: min(85vw, 320px) !important; }}
-           [data-testid="collapsedControl"] {{ top: 10px !important; left: 10px !important; }}
+
+           /* Restore Mobile Sidebar Visibility */
+           [data-testid="collapsedControl"] {{
+               display: flex !important;
+               visibility: visible !important;
+               opacity: 1 !important;
+               z-index: 999999 !important;
+               background: #4A5D32 !important;
+               border-radius: 50% !important;
+               width: 40px !important;
+               height: 40px !important;
+               justify-content: center !important;
+               align-items: center !important;
+               box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+           }}
+           [data-testid="collapsedControl"] button {{ color: white !important; }}
        }}
        @media (max-width: 480px) {{
            h1 {{ font-size: 1.6rem !important; }}
@@ -206,6 +220,7 @@ def apply_custom_css(bg_inicio, bg_locker):
            .uw-slide {{ width: 190px !important; height: 140px !important; }}
        }}
 
+       /* Locker Styling */
        .locker-box-clean {{ background-color: #FFFFFF !important; border: 1px solid #EAEAEA !important; border-radius: 8px !important; padding: 2.5rem !important; margin-bottom: 1.5rem !important; }}
        [data-testid="stVerticalBlockBorderWrapper"] {{ background-color: #FFFFFF !important; border: 1px solid #EAEAEA !important; border-radius: 8px !important; margin-bottom: 1.5rem !important; padding: 2rem 2.2rem !important; min-height: 220px !important; }}
        [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] {{ align-items: flex-start !important; }}
@@ -236,9 +251,6 @@ def apply_custom_css(bg_inicio, bg_locker):
        [data-testid="stFormSubmitButton"] > button {{ background-color: #4A5D32 !important; color: #FFFFFF !important; border: none !important; width: 100% !important; height: 52px !important; margin-top: 1.2rem !important; font-size: 1rem !important; font-weight: 600 !important; font-family: Montserrat, sans-serif !important; letter-spacing: 0.01em !important; border-radius: 8px !important; }}
        [data-testid="stFormSubmitButton"] > button:hover {{ background-color: #3a4a27 !important; }}
        .auth-redirect-text {{ font-size: 0.9rem; color: #999999; margin-top: 2rem !important; margin-bottom: 0.5rem !important; text-align: center; font-family: Montserrat, sans-serif; }}
-       [data-testid="stSidebar"] {{ background-color: #FFFFFF !important; border-right: 0.5px solid #EAEAEA !important; }}
-       [data-testid="stSidebar"] section[data-testid="stSidebarContent"] > div {{ padding: 0 !important; gap: 0 !important; }}
-       [data-testid="stSidebar"] a:hover {{ background: #F5F5F3 !important; color: #1A1A1A !important; }}
        .auth-img-box {{ width: 100%; min-height: 560px; height: 100%; background-size: cover; background-position: center; border-radius: 8px; }}
        .gemini-chat-container {{ max-width: 760px; margin: 0 auto 1.25rem; padding: 0.5rem 0.25rem; border: none; background: transparent; box-shadow: none; outline: none !important; -webkit-tap-highlight-color: transparent; }}
        .gemini-row {{ display: flex; margin-bottom: 1.1rem; outline: none !important; -webkit-tap-highlight-color: transparent; }}
@@ -258,7 +270,12 @@ def apply_custom_css(bg_inicio, bg_locker):
        div[data-testid="stChatInput"] {{ background-color: transparent !important; border: none !important; padding: 0 !important; overflow: visible !important; }}
        div[data-testid="stChatInput"] textarea {{ border-radius: 24px !important; }}
 
-       /* Custom Loading Animation */
+       /* Green Loading Spinner Override */
+       [data-testid="stLoading"] svg {{ stroke: #4A5D32 !important; }}
+       [data-testid="stStatusWidget"] {{ color: #4A5D32 !important; }}
+       .st-emotion-cache-1vofv7o svg {{ stroke: #4A5D32 !important; }}
+
+       /* Custom Loading Animation Component */
        .loading-circle {{
            width: 40px; height: 40px;
            border: 4px solid #f3f3f3;
