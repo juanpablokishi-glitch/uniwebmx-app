@@ -797,6 +797,7 @@ def _tutor_confirmado_fresco(username):
 PANEL_ADMIN_PAGES = [
     "panel_admin", "panel_chat", "panel_simulador",
     "panel_carreras", "panel_perfiles", "panel_carreras_perfiles", "panel_consultor", "panel_usuarios",
+    "panel_blog",
 ]
 
 
@@ -1755,6 +1756,10 @@ elif st.session_state.logged_in and st.session_state.page in PANEL_ADMIN_PAGES a
     st.session_state.page = "locker" if st.session_state.get("perfil_completo") else "onboarding"
 elif st.session_state.page == "panel_usuarios" and not es_admin():
     # Solo el equipo de Uniwebmx puede asignar roles, una universidad no.
+    st.session_state.page = "panel_admin"
+elif st.session_state.page == "panel_blog" and not es_admin():
+    # El blog es contenido propio de Uniwebmx, no algo que gestione una
+    # universidad — mismo criterio que panel_usuarios.
     st.session_state.page = "panel_admin"
 elif st.session_state.page == "panel_chat" and es_universidad():
     # "Uso de Hugo (chat)" es una métrica de producto para Uniwebmx, no algo
@@ -2939,6 +2944,7 @@ if es_panel:
    _icon_perfiles   = '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>'
    _icon_consultor  = '<path d="M12 2a7 7 0 0 0-7 7c0 3 2 4 2 7h10c0-3 2-4 2-7a7 7 0 0 0-7-7z"/><path d="M9 21h6"/>'
    _icon_usuarios   = '<circle cx="9" cy="7" r="4"/><path d="M2 21c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M17 8a3 3 0 1 1 0 6"/><path d="M22 21c0-2.5-1.8-4.5-4.3-5.4"/>'
+   _icon_blog       = '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/>'
 
    with st.sidebar:
        if _es_uni_panel:
@@ -2978,7 +2984,10 @@ if es_panel:
                {_sb_item_panel("Consultor Hugo", "panel_consultor", _icon_consultor)}
            </div>"""
            + (f'<p style="{_label_style_panel}">Administración</p>'
-              f'<div style="padding:0 10px;">{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}</div>'
+              f'<div style="padding:0 10px;">'
+              f'{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}'
+              f'{_sb_item_panel("Blog", "panel_blog", _icon_blog)}'
+              f'</div>'
               if es_admin() else "")
            + """
            <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
@@ -3627,6 +3636,76 @@ def _panel_header(titulo, subtitulo=""):
 
 
 # =================================================================
+# BLOG (administrado desde el Panel) — requiere la tabla "blog_posts"
+# en Supabase. SQL para crearla (correr una sola vez en el SQL Editor
+# de Supabase):
+#
+#   create table blog_posts (
+#       id bigint generated always as identity primary key,
+#       tag text not null default '',
+#       titulo text not null,
+#       autor text not null default '',
+#       resumen text not null default '',
+#       minutos text not null default '',
+#       datos jsonb not null default '[]'::jsonb,
+#       publicado boolean not null default true,
+#       orden integer not null default 0,
+#       creado_en timestamptz not null default now()
+#   );
+#
+# Si nunca corriste ese SQL, estas funciones no truenan la app: capturan
+# el error y devuelven listas vacías / False, igual que _log_evento.
+# =================================================================
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cargar_blog_posts(solo_publicados=True):
+    """Trae los artículos desde Supabase, más recientes/con mayor 'orden'
+    primero. Cacheado 60s para no pegarle a la BD en cada rerun de cada
+    visitante de la landing pública."""
+    try:
+        query = supabase_client.table("blog_posts").select("*")
+        if solo_publicados:
+            query = query.eq("publicado", True)
+        res = query.order("orden", desc=True).order("creado_en", desc=True).execute()
+        return res.data or []
+    except Exception:
+        return []
+
+
+def _crear_blog_post(tag, titulo, autor, resumen, minutos, datos_lista, publicado=True):
+    try:
+        supabase_client.table("blog_posts").insert({
+            "tag": tag, "titulo": titulo, "autor": autor, "resumen": resumen,
+            "minutos": minutos, "datos": datos_lista, "publicado": publicado,
+        }).execute()
+        _cargar_blog_posts.clear()
+        return True
+    except Exception as e:
+        _notificar_error_admin("_crear_blog_post", e, extra=f"titulo={titulo}")
+        return False
+
+
+def _actualizar_blog_post(post_id, cambios: dict):
+    try:
+        supabase_client.table("blog_posts").update(cambios).eq("id", post_id).execute()
+        _cargar_blog_posts.clear()
+        return True
+    except Exception as e:
+        _notificar_error_admin("_actualizar_blog_post", e, extra=f"id={post_id}")
+        return False
+
+
+def _eliminar_blog_post(post_id):
+    try:
+        supabase_client.table("blog_posts").delete().eq("id", post_id).execute()
+        _cargar_blog_posts.clear()
+        return True
+    except Exception as e:
+        _notificar_error_admin("_eliminar_blog_post", e, extra=f"id={post_id}")
+        return False
+
+
+# =================================================================
 # VISTAS DEL SISTEMA
 # =================================================================
 
@@ -3819,24 +3898,9 @@ elif st.session_state.page == "blog":
     </div>
     """, unsafe_allow_html=True)
 
-    # Los 5 artículos de ejemplo (redactados internamente, sin autor real) se
-    # quitaron a propósito. A partir de ahora este espacio es para artículos
-    # reales, firmados por investigadores/especialistas. Para publicar uno
-    # nuevo, agrega un diccionario a la lista `articulos` con esta forma
-    # (el campo "autor" se muestra debajo del tag; déjalo vacío si no aplica):
-    #
-    # articulos = [
-    #     {
-    #         "tag": "Examen de admisión",
-    #         "titulo": "Título del artículo",
-    #         "autor": "Nombre Apellido — Doctorado en Educación, Universidad X",
-    #         "resumen": "Texto del artículo o resumen...",
-    #         "minutos": "5 min",
-    #         "datos": ["Dato destacado 1", "Dato destacado 2"],
-    #     },
-    #     ...
-    # ]
-    articulos = []
+    # Los artículos ya no viven en el código: se administran desde
+    # Panel de administrador → Blog (tabla "blog_posts" en Supabase).
+    articulos = _cargar_blog_posts(solo_publicados=True)
 
     if not articulos:
         st.markdown("""
@@ -3850,7 +3914,7 @@ elif st.session_state.page == "blog":
         """, unsafe_allow_html=True)
     else:
         for art in articulos:
-            datos_html = "".join([f'<span style="background:#F7F7F5;color:#444;font-size:0.75rem;padding:4px 10px;border-radius:8px;margin-right:6px;">{d}</span>' for d in art.get("datos", [])])
+            datos_html = "".join([f'<span style="background:#F7F7F5;color:#444;font-size:0.75rem;padding:4px 10px;border-radius:8px;margin-right:6px;">{d}</span>' for d in art.get("datos") or []])
             autor_html = (
                 f'<p style="font-size:0.82rem;color:#4A5D32;font-weight:600;margin:0 0 10px;">{art["autor"]}</p>'
                 if art.get("autor") else ""
@@ -3858,12 +3922,12 @@ elif st.session_state.page == "blog":
             st.markdown(f"""
             <div style="padding:28px;border:1px solid #EAEAEA;border-radius:10px;margin-bottom:16px;background:#FFFFFF;">
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                    <span style="background:#EEF1E9;color:#4A5D32;font-size:0.72rem;font-weight:600;padding:3px 10px;border-radius:12px;">{art['tag']}</span>
-                    <span style="font-size:0.78rem;color:#AAAAAA;">{art['minutos']} de lectura</span>
+                    <span style="background:#EEF1E9;color:#4A5D32;font-size:0.72rem;font-weight:600;padding:3px 10px;border-radius:12px;">{art.get('tag','')}</span>
+                    <span style="font-size:0.78rem;color:#AAAAAA;">{art.get('minutos','')} de lectura</span>
                 </div>
-                <h3 style="font-size:1.2rem;font-weight:700;color:#1A1A1A;margin-bottom:6px;">{art['titulo']}</h3>
+                <h3 style="font-size:1.2rem;font-weight:700;color:#1A1A1A;margin-bottom:6px;">{art.get('titulo','')}</h3>
                 {autor_html}
-                <p style="font-size:0.95rem;color:#555555;line-height:1.7;margin-bottom:14px;">{art['resumen']}</p>
+                <p style="font-size:0.95rem;color:#555555;line-height:1.7;margin-bottom:14px;">{art.get('resumen','')}</p>
                 <div>{datos_html}</div>
             </div>
             """, unsafe_allow_html=True)
@@ -5765,6 +5829,77 @@ elif st.session_state.page == "panel_usuarios":
                         st.error(f"No se pudo actualizar: {e}")
     else:
         st.caption("Escribe el usuario o correo exacto de la cuenta a la que le quieres cambiar el rol.")
+
+# --- VISTA: BLOG (administración) ---
+elif st.session_state.page == "panel_blog":
+    _panel_header("Blog", "Publica y administra los artículos que se ven en /?page=blog.")
+
+    with st.expander("➕ Nuevo artículo", expanded=False):
+        with st.form("form_nuevo_blog_post", clear_on_submit=True):
+            _b_tag = st.text_input("Categoría (tag)", placeholder="ej. Costos, Becas, Estrategia")
+            _b_titulo = st.text_input("Título")
+            _b_autor = st.text_input("Autor", placeholder="ej. Dra. Ana Pérez — Investigadora en Educación, UdeG")
+            _b_resumen = st.text_area("Contenido / resumen", height=200)
+            _b_minutos = st.text_input("Tiempo de lectura", value="5 min")
+            _b_datos_raw = st.text_area(
+                "Datos destacados (uno por línea, opcional)",
+                placeholder="Dato 1\nDato 2\nDato 3",
+                height=80,
+            )
+            _b_publicado = st.checkbox("Publicar de inmediato", value=True)
+            _b_guardar = st.form_submit_button("Guardar artículo", use_container_width=True)
+
+        if _b_guardar:
+            if not _b_titulo.strip() or not _b_resumen.strip():
+                st.error("El título y el contenido son obligatorios.")
+            else:
+                _b_datos_lista = [d.strip() for d in _b_datos_raw.splitlines() if d.strip()]
+                if _crear_blog_post(_b_tag.strip(), _b_titulo.strip(), _b_autor.strip(), _b_resumen.strip(), _b_minutos.strip(), _b_datos_lista, _b_publicado):
+                    st.success(f"'{_b_titulo}' se guardó correctamente.")
+                    st.rerun()
+
+    st.markdown("<div style='margin:1.5rem 0 1rem;'></div>", unsafe_allow_html=True)
+
+    _todos_los_posts = _cargar_blog_posts(solo_publicados=False)
+
+    if not _todos_los_posts:
+        st.info("Todavía no hay artículos. Usa 'Nuevo artículo' arriba para crear el primero. Si acabas de crear la tabla `blog_posts` en Supabase, este mensaje es normal.")
+    else:
+        for _post in _todos_los_posts:
+            _estado = "🟢 Publicado" if _post.get("publicado") else "⚪ Borrador"
+            with st.expander(f"{_estado} — {_post.get('titulo', '(sin título)')}", expanded=False):
+                with st.form(f"form_editar_blog_{_post['id']}"):
+                    _e_tag = st.text_input("Categoría (tag)", value=_post.get("tag", ""), key=f"e_tag_{_post['id']}")
+                    _e_titulo = st.text_input("Título", value=_post.get("titulo", ""), key=f"e_titulo_{_post['id']}")
+                    _e_autor = st.text_input("Autor", value=_post.get("autor", ""), key=f"e_autor_{_post['id']}")
+                    _e_resumen = st.text_area("Contenido / resumen", value=_post.get("resumen", ""), height=200, key=f"e_resumen_{_post['id']}")
+                    _e_minutos = st.text_input("Tiempo de lectura", value=_post.get("minutos", ""), key=f"e_minutos_{_post['id']}")
+                    _e_datos_raw = st.text_area(
+                        "Datos destacados (uno por línea)",
+                        value="\n".join(_post.get("datos") or []),
+                        height=80,
+                        key=f"e_datos_{_post['id']}",
+                    )
+                    _e_publicado = st.checkbox("Publicado", value=bool(_post.get("publicado")), key=f"e_pub_{_post['id']}")
+                    col_e1, col_e2 = st.columns(2)
+                    with col_e1:
+                        _e_guardar = st.form_submit_button("Guardar cambios", use_container_width=True)
+                    with col_e2:
+                        _e_borrar = st.form_submit_button("🗑️ Eliminar", use_container_width=True)
+
+                if _e_guardar:
+                    _e_datos_lista = [d.strip() for d in _e_datos_raw.splitlines() if d.strip()]
+                    if _actualizar_blog_post(_post["id"], {
+                        "tag": _e_tag.strip(), "titulo": _e_titulo.strip(), "autor": _e_autor.strip(),
+                        "resumen": _e_resumen.strip(), "minutos": _e_minutos.strip(),
+                        "datos": _e_datos_lista, "publicado": _e_publicado,
+                    }):
+                        st.success("Actualizado.")
+                        st.rerun()
+                if _e_borrar:
+                    if _eliminar_blog_post(_post["id"]):
+                        st.success("Artículo eliminado.")
+                        st.rerun()
 
 # --- VISTA: CONFIRMACIÓN DEL TUTOR (doble opt-in para cuentas de menores de edad) ---
 elif st.session_state.page == "confirmar_tutor":
