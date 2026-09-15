@@ -613,12 +613,6 @@ def guardar_datos_usuario(username):
         "curriculum": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("curriculum", _doc_vacio),
         "cartas": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("cartas", _doc_vacio),
         "portafolio": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("portafolio", _doc_vacio),
-        # Documentos personales
-        "acta": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("acta", _doc_vacio),
-        "curp": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("curp", _doc_vacio),
-        "identificacion": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("identificacion", _doc_vacio),
-        "foto": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("foto", _doc_vacio),
-        "comprobante": _doc_vacio if _bloquear_persistencia_docs else st.session_state.get("comprobante", _doc_vacio),
         "resultados_simulador": st.session_state.get("resultados_simulador", None),
         "unis_seleccionadas": st.session_state.get("unis_seleccionadas", []),
         "correo_conectado": st.session_state.get("correo_conectado", ""),
@@ -667,12 +661,6 @@ def restaurar_sesion_usuario(username):
     st.session_state.curriculum  = datos.get("curriculum",{"nombre": None, "contenido": ""})
     st.session_state.cartas      = datos.get("cartas",    {"nombre": None, "contenido": ""})
     st.session_state.portafolio  = datos.get("portafolio",{"nombre": None, "contenido": ""})
-    # Documentos personales
-    st.session_state.acta          = datos.get("acta",         {"nombre": None, "contenido": ""})
-    st.session_state.curp          = datos.get("curp",         {"nombre": None, "contenido": ""})
-    st.session_state.identificacion= datos.get("identificacion",{"nombre": None, "contenido": ""})
-    st.session_state.foto          = datos.get("foto",         {"nombre": None, "contenido": ""})
-    st.session_state.comprobante   = datos.get("comprobante",  {"nombre": None, "contenido": ""})
     if datos.get("resultados_simulador"):
         st.session_state.resultados_simulador = datos["resultados_simulador"]
     st.session_state.unis_seleccionadas = datos.get("unis_seleccionadas", [])
@@ -906,7 +894,7 @@ def mostrar_visor_documento(username, tipo_documento, titulo_boton="Ver / Descar
 
 
 def generar_zip_carpeta(username, tipos_documento):
-    """Arma un .zip en memoria con los archivos originales (kárdex, acta, etc.)
+    """Arma un .zip en memoria con los archivos originales (kárdex, ensayo, etc.)
     que el usuario ya tiene subidos en su Locker Digital, para una lista de
     tipos de documento (normalmente los que pide una universidad específica).
     Los documentos que aún no se han subido simplemente se omiten del zip.
@@ -943,8 +931,8 @@ UNIVERSIDADES_DATA = {
         "tasa_historica": 25,
         "confianza": "oficial",
         "fuente": "Promedio mínimo 8.5 y PAA mínimo ~1,320/1,600 pts; tasa de aceptación ~25%.",
-        "documentos": ["kardex", "ensayo", "curriculum", "cartas", "acta", "curp", "identificacion", "foto", "comprobante"],
-        "documentos_extra": ["Ficha de inscripción pagada", "Resultado oficial del PAA/examen de admisión"],
+        "documentos": ["kardex", "ensayo", "curriculum", "cartas"],
+        "documentos_extra": ["Ficha de inscripción pagada", "Resultado oficial del PAA/examen de admisión", "Acta de nacimiento, identificación oficial, foto, CURP y comprobante de domicilio (entrégalos directo a la universidad, Uniwebmx ya no los guarda)"],
         "proceso": [
             "Crear solicitud en solicitud.tec.mx",
             "Pagar cuota de admisión (~$1,300 MXN)",
@@ -967,8 +955,8 @@ UNIVERSIDADES_DATA = {
         "tasa_historica": 33.5,
         "confianza": "parcial",
         "fuente": "Tasa de aceptación oficial 2026-A: 56,202 admitidos de 167,690 aspirantes (~33.5%). El puntaje mínimo real varía por carrera y centro universitario, no es un número fijo.",
-        "documentos": ["kardex", "acta", "curp", "identificacion", "foto", "comprobante"],
-        "documentos_extra": ["Ficha PRECOSECH / pago de derechos", "Certificado de bachillerato (no solo kárdex)"],
+        "documentos": ["kardex"],
+        "documentos_extra": ["Ficha PRECOSECH / pago de derechos", "Certificado de bachillerato (no solo kárdex)", "Acta de nacimiento, identificación oficial, foto, CURP y comprobante de domicilio (entrégalos directo a la universidad, Uniwebmx ya no los guarda)"],
         "proceso": [
             "Registro PRECOSECH y pago de derechos",
             "Presentar PAA del College Board (la sección de inglés no cuenta para el puntaje final)",
@@ -990,8 +978,8 @@ UNIVERSIDADES_DATA = {
         "tasa_historica": 78,
         "confianza": "estimado",
         "fuente": "No hay tasa de aceptación pública. Estimado a partir de fuentes que describen el ingreso como poco competitivo (excepto Medicina).",
-        "documentos": ["kardex", "ensayo", "curriculum", "acta", "curp", "identificacion", "foto", "comprobante"],
-        "documentos_extra": ["Entrevista de admisión agendada"],
+        "documentos": ["kardex", "ensayo", "curriculum"],
+        "documentos_extra": ["Entrevista de admisión agendada", "Acta de nacimiento, identificación oficial, foto, CURP y comprobante de domicilio (entrégalos directo a la universidad, Uniwebmx ya no los guarda)"],
         "proceso": [
             "Solicitud en línea (mkt.up.edu.mx)",
             "Examen PAA del College Board",
@@ -1013,8 +1001,8 @@ UNIVERSIDADES_DATA = {
         "tasa_historica": 75,
         "confianza": "estimado",
         "fuente": "No hay tasa de aceptación pública. Estimado: descrita como menos competitiva que universidades públicas.",
-        "documentos": ["kardex", "ensayo", "acta", "curp", "identificacion", "foto", "comprobante"],
-        "documentos_extra": ["Ficha de admisión pagada"],
+        "documentos": ["kardex", "ensayo"],
+        "documentos_extra": ["Ficha de admisión pagada", "Acta de nacimiento, identificación oficial, foto, CURP y comprobante de domicilio (entrégalos directo a la universidad, Uniwebmx ya no los guarda)"],
         "proceso": [
             "Solicitud en línea (admision.iteso.mx)",
             "Entrega de documentos requeridos",
@@ -1037,8 +1025,8 @@ UNIVERSIDADES_DATA = {
         "tasa_historica": 9,
         "confianza": "parcial",
         "fuente": "Promedio mínimo oficial de 7.0. Tasa de aceptación general del Concurso de Selección ≈9%, pero varía desde ~1.4% en Medicina hasta carreras de baja demanda con corte mucho menor.",
-        "documentos": ["kardex", "acta", "curp", "identificacion", "foto"],
-        "documentos_extra": ["Pago de derecho a examen", "Cita para registro de foto, firma y huella (biométricos)", "Examen diagnóstico de inglés (obligatorio, no elimina)"],
+        "documentos": ["kardex"],
+        "documentos_extra": ["Pago de derecho a examen", "Cita para registro de foto, firma y huella (biométricos)", "Examen diagnóstico de inglés (obligatorio, no elimina)", "Acta de nacimiento, identificación oficial, foto y CURP (entrégalos directo a la universidad, Uniwebmx ya no los guarda)"],
         "proceso": [
             "Registro en el portal DGAE en fechas oficiales",
             "Elegir UNA carrera, UN sistema y UN plantel (no se puede cambiar tras confirmar)",
@@ -1067,8 +1055,8 @@ UNIVERSIDADES_DATA = {
         "tasa_historica": 80,
         "confianza": "estimado",
         "fuente": "Sin tasa de aceptación pública. Universidad privada más antigua de México (1935), campus principal en Zapopan, Jalisco. Examen descrito como filtro de aptitud, no muy selectivo salvo Medicina.",
-        "documentos": ["kardex", "acta", "curp", "identificacion", "foto", "comprobante"],
-        "documentos_extra": ["Autobiografía (mínimo 2 páginas)"],
+        "documentos": ["kardex"],
+        "documentos_extra": ["Autobiografía (mínimo 2 páginas)", "Acta de nacimiento, identificación oficial, foto, CURP y comprobante de domicilio (entrégalos directo a la universidad, Uniwebmx ya no los guarda)"],
         "proceso": [
             "Llenar solicitud en admision.uag.mx",
             "Adjuntar autobiografía, acta de nacimiento, fotografía, certificado/constancia de bachillerato con promedio, comprobante de domicilio",
@@ -1476,11 +1464,6 @@ DOCUMENTOS_LOCKER_INFO = {
     "curriculum":     {"label": "Currículum académico",          "tipo": "académico"},
     "cartas":         {"label": "Cartas de recomendación",       "tipo": "académico"},
     "portafolio":     {"label": "Portafolio / Extracurriculares","tipo": "académico"},
-    "acta":           {"label": "Acta de nacimiento",            "tipo": "personal"},
-    "curp":           {"label": "CURP",                          "tipo": "personal"},
-    "identificacion": {"label": "Identificación oficial",        "tipo": "personal"},
-    "foto":           {"label": "Foto credencial",                "tipo": "personal"},
-    "comprobante":    {"label": "Comprobante de domicilio",      "tipo": "personal"},
 }
 
 
@@ -1851,6 +1834,36 @@ st.markdown(f"""
        height: 40px !important;
        box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
    }}
+
+   /* --- ESTABILIZAR LA VISTA EN CELULAR (barra superior y pie de página
+      "saltando") ---
+      En móvil, el navegador (Chrome/Safari) muestra/oculta su propia barra
+      de direcciones al hacer scroll, lo que cambia la altura visible de la
+      pantalla en tiempo real. Los elementos con position:fixed (el header
+      nativo de Streamlit y el botón de abrir/cerrar sidebar) se recalculan
+      contra esa altura variable y "brincan" o tiemblan mientras se hace
+      scroll. Fijamos la altura contra el viewport "pequeño" estable
+      (100svh) en vez de dejar que el navegador la recalcule a cada rato, y
+      forzamos una capa GPU propia en el header para que no se redibuje
+      junto con el resto del documento. */
+   html, body {{
+       height: 100%;
+   }}
+   .stApp {{
+       min-height: 100svh;
+   }}
+   header[data-testid="stHeader"] {{
+       position: fixed !important;
+       top: 0 !important;
+       left: 0 !important;
+       right: 0 !important;
+       transform: translateZ(0);
+       will-change: auto !important;
+   }}
+   [data-testid="collapsedControl"] {{
+       position: fixed !important;
+       transform: translateZ(0);
+   }}
    /* Al quitar el header, recuperamos el espacio que dejaba arriba.
       OJO: -3.5rem tapaba la parte superior de la barra de navegación
       propia (logo, Ranking, Blog, Comunidad). Ya no compensamos ese
@@ -1912,6 +1925,22 @@ st.markdown(f"""
        margin-top: 0px !important;
    }}
 
+
+   /* NAVBAR SUPERIOR PÚBLICA */
+   .uw-navbar-top {{
+       display: flex;
+       align-items: center;
+       justify-content: space-between;
+       flex-wrap: nowrap;
+       padding: 12px 0 10px;
+       margin-bottom: 0.5rem;
+       min-height: 52px;
+   }}
+   .uw-navbar-links {{
+       display: flex;
+       align-items: center;
+       gap: 28px;
+   }}
 
    /* NAVBAR */
    .navbar-custom {{
@@ -2102,6 +2131,33 @@ st.markdown(f"""
        [data-testid="collapsedControl"] {{
            top: 6px !important;
            left: 6px !important;
+       }}
+       /* Barra superior pública: con logo + 3 links + 2 botones no cabe en
+          una pantalla angosta. Antes no tenía NINGUNA regla mobile, así que
+          el navegador la envolvía a 2 líneas de forma distinta en cada
+          rerun (cada vez que cambiaba el ancho disponible por el ícono de
+          la sidebar, el teclado, etc.), lo que se sentía como que "se
+          movía". Ocultamos los links secundarios y dejamos solo logo +
+          botones en una sola línea estable; Ranking/Blog siguen accesibles
+          desde dentro de cada página. */
+       .uw-navbar-link {{
+           display: none !important;
+       }}
+       .uw-navbar-top {{
+           padding: 10px 0 8px !important;
+       }}
+       .uw-navbar-top a[href="/?page=login"],
+       .uw-navbar-top a[href="/?page=registro"] {{
+           padding: 6px 12px !important;
+           font-size: 0.78rem !important;
+       }}
+       /* Pie de página público: los 3 st.columns de Streamlit se apilan
+          solos por debajo de ~640px, pero sin gap ni orden fijo se veían
+          empujados de forma distinta según cuánto contenido cargó arriba
+          todavía. Les damos espaciado y ancho consistentes para que no
+          "salten" mientras el resto de la página termina de cargar. */
+       [data-testid="stHorizontalBlock"]:has(> div a[href="https://www.instagram.com/uniwebmx/"]) {{
+           gap: 0.75rem !important;
        }}
    }}
    @media (max-width: 480px) {{
@@ -2536,12 +2592,12 @@ if not es_hub and not es_panel and st.session_state.page != "onboarding":
        '<span style="font-size:15px;font-weight:600;color:#1A1A1A;letter-spacing:-0.03em;">uniwebmx</span>'
    )
    st.markdown(f"""
-   <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0 10px;margin-bottom:0.5rem;">
-       <div style="display:flex;align-items:center;gap:28px;">
+   <div class="uw-navbar-top">
+       <div class="uw-navbar-links">
            <a href="/?page=inicio" target="_self" style="text-decoration:none;">{_logo_nav}</a>
-           <a href="/?page=ranking" target="_self" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;">Ranking</a>
-           <a href="/?page=blog" target="_self" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;">Blog</a>
-           <a href="#" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;opacity:0.5;pointer-events:none;">Comunidad</a>
+           <a href="/?page=ranking" target="_self" class="uw-navbar-link" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;">Ranking</a>
+           <a href="/?page=blog" target="_self" class="uw-navbar-link" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;">Blog</a>
+           <a href="#" class="uw-navbar-link" style="font-size:0.9rem;font-weight:500;color:#1A1A1A;text-decoration:none;opacity:0.5;pointer-events:none;">Comunidad</a>
        </div>
        <div style="display:flex;align-items:center;gap:8px;">
            <a href="/?page=login" target="_self" style="text-decoration:none;font-family:Montserrat,sans-serif;font-size:0.85rem;font-weight:500;color:#1A1A1A;padding:7px 16px;border:0.5px solid #DCDCDC;border-radius:6px;white-space:nowrap;">Iniciar sesión</a>
@@ -3003,7 +3059,7 @@ Para cualquier duda sobre este aviso, puedes contactarnos en: **info@uniwebmx.co
 - Si eres **menor de edad**, el uso de Uniwebmx y el tratamiento de tus datos personales requiere el **consentimiento de tu padre, madre o tutor legal**, particularmente para las finalidades secundarias descritas en la Sección 6 (uso de tus datos para entrenar/mejorar a Hugo y para compartir tu información con universidades).
 - Al registrarte como menor de edad, te pediremos el contacto de un padre/tutor. Ese contacto recibe un correo con un enlace de confirmación (doble verificación): mientras el padre/tutor no confirme desde ese enlace, **solo se procesarán tus datos para las finalidades primarias** indispensables para darte el servicio (Sección 5); las finalidades secundarias permanecen desactivadas.
 - Al confirmar, el padre/madre/tutor decide, con casillas independientes, si autoriza cada finalidad secundaria (6.1, 6.2, 6.3) por separado.
-- **El Locker Digital (almacenamiento permanente de documentos) no está disponible para cuentas de menores de edad mientras su padre, madre o tutor no haya confirmado la cuenta mediante el enlace de verificación.** Dado que ahí se guardan documentos especialmente sensibles (acta de nacimiento, CURP, identificación oficial, comprobante de domicilio), decidimos no almacenarlos de forma persistente hasta contar con esa confirmación. Una vez que el padre/madre/tutor confirma la cuenta, el Locker Digital queda disponible con normalidad, igual que para un usuario mayor de edad. Los alumnos menores de edad sí pueden usar con normalidad a Hugo y el Simulador Estadístico desde el registro, sin necesidad de esta confirmación.
+- **El Locker Digital (almacenamiento permanente de documentos) no está disponible para cuentas de menores de edad mientras su padre, madre o tutor no haya confirmado la cuenta mediante el enlace de verificación.** El Locker guarda documentos académicos (kárdex, ensayo, currículum, cartas de recomendación, portafolio); no almacena ningún documento de identidad. Aun así, mientras no exista esa confirmación no se persiste ningún documento del alumno. Una vez que el padre/madre/tutor confirma la cuenta, el Locker Digital queda disponible con normalidad, igual que para un usuario mayor de edad. Los alumnos menores de edad sí pueden usar con normalidad a Hugo y el Simulador Estadístico desde el registro, sin necesidad de esta confirmación.
 - Un padre, madre o tutor puede en cualquier momento solicitar el acceso, corrección o eliminación de los datos de su hijo/a menor de edad, o revocar el consentimiento otorgado, escribiendo a **info@uniwebmx.com**.
 
 ---
@@ -3019,7 +3075,7 @@ Dependiendo de cómo uses la plataforma, podemos recabar:
 - Kárdex/certificado de bachillerato, promedio, ensayo o carta de motivos, currículo, cartas de recomendación, universidades y carreras de tu interés.
 
 **Documentos de identidad (Locker Digital):**
-- Acta de nacimiento, CURP, identificación oficial, fotografía, comprobante de domicilio. Si tu cuenta está registrada como menor de edad, esta función queda disponible hasta que tu padre, madre o tutor confirme la cuenta mediante el enlace de verificación (ver Sección 2).
+- Kárdex/certificado, ensayo o carta de motivos, currículum académico, cartas de recomendación y portafolio. Uniwebmx no solicita ni almacena ningún documento de identidad (acta de nacimiento, identificación oficial, CURP, comprobante de domicilio, fotografía): esos trámites los gestionas directo con cada universidad. Si tu cuenta está registrada como menor de edad, esta función queda disponible hasta que tu padre, madre o tutor confirme la cuenta mediante el enlace de verificación (ver Sección 2).
 
 **Datos derivados del uso de la plataforma:**
 - Conversaciones con Hugo (nuestro asesor con inteligencia artificial), resultados del simulador de probabilidades, historial de mensajes.
@@ -3198,7 +3254,7 @@ Uniwebmx **no comparte tu información con universidades a menos que tú (o tu p
 ## 8. Propiedad intelectual
 
 - El contenido, diseño, marca y software de Uniwebmx son propiedad de **Juan Pablo Kishi Gómez** o de sus licenciantes.
-- Los documentos que subas (kárdex, ensayo, identificaciones, etc.) siguen siendo de tu propiedad; nos das una licencia limitada para almacenarlos y procesarlos únicamente con el fin de prestarte el servicio, conforme al Aviso de Privacidad.
+- Los documentos que subas (kárdex, ensayo, cartas de recomendación, etc.) siguen siendo de tu propiedad; nos das una licencia limitada para almacenarlos y procesarlos únicamente con el fin de prestarte el servicio, conforme al Aviso de Privacidad.
 
 ---
 
@@ -3763,57 +3819,54 @@ elif st.session_state.page == "blog":
     </div>
     """, unsafe_allow_html=True)
 
-    articulos = [
-        {
-            "tag": "Examen de admisión",
-            "titulo": "Cómo prepararte para el examen de la UNAM en 2026",
-            "resumen": "El examen consta de 120 reactivos de opción múltiple en 9 materias, divididos en 4 áreas según tu carrera. La clave no es estudiar todo: es identificar las materias con más reactivos en tu área y atacarlas primero. Empieza al menos 4 meses antes, usa simulacros semanales y descarga la guía oficial en dgae.unam.mx al momento de registrarte.",
-            "minutos": "5 min",
-            "datos": ["120 reactivos · 3 horas", "4 áreas de conocimiento", "Tasa de aceptación: ~9%"],
-        },
-        {
-            "tag": "Costos",
-            "titulo": "Cuánto cuesta realmente estudiar en las universidades privadas top de México",
-            "resumen": "Muchos aspirantes se enfocan en la colegiatura pero olvidan los gastos asociados. En el Tec de Monterrey el semestre va de $155k a $189k MXN dependiendo del campus, pero hay que sumar seguro médico, materiales y, si te mudas, aproximadamente $6,400 mensuales en vivienda. La UP es técnicamente la más cara del país en 2026 con $177k por semestre, mientras que UAG es de las opciones privadas más accesibles en Guadalajara, con semestres desde $27k MXN según la carrera.",
-            "minutos": "4 min",
-            "datos": ["UP: $177k/sem (la más cara)", "Tec: $155k–$189k/sem", "UdeG y UNAM: prácticamente gratuitas"],
-        },
-        {
-            "tag": "Estrategia",
-            "titulo": "Qué buscan realmente las universidades en tu expediente",
-            "resumen": "Las privadas top valoran tres cosas sobre todo: consistencia académica (no perfección, sino tendencia), actividades extracurriculares con compromiso real (no una lista de logros de una sola vez), y un ensayo personal que conecte tu historia con tu carrera elegida. En el Tec, el PAA pesa mucho; en la UAG, la autobiografía es parte central del expediente. Conocer la fórmula de cada universidad te permite enfocar tus energías correctamente.",
-            "minutos": "6 min",
-            "datos": ["UAG: autobiografía + PAA", "Tec: PAA mínimo 1,320 pts", "UNAM: solo aciertos, sin promedio"],
-        },
-        {
-            "tag": "Guía",
-            "titulo": "UdeG vs UNAM: ¿cuál es la mejor pública para estudiar en Jalisco?",
-            "resumen": "Ambas son gratuitas y prestigiosas, pero muy diferentes. La UNAM tiene mayor reconocimiento internacional (posición #145 QS vs #1001–1200 de UdeG), pero sus campus están principalmente en CDMX. La UdeG es la segunda más grande de México con más de 100,000 estudiantes y una tasa de aceptación del 34.5% — mucho más accesible que el 9% de la UNAM. Si vives en Guadalajara o el Bajío, la UdeG es una opción sólida sin necesidad de mudarte.",
-            "minutos": "5 min",
-            "datos": ["UNAM: #145 QS mundial", "UdeG: +100,000 estudiantes", "UdeG acepta 34.5% vs 9% UNAM"],
-        },
-        {
-            "tag": "Becas",
-            "titulo": "Cómo conseguir beca en el Tec de Monterrey",
-            "resumen": "El Tec ofrece becas por talento académico, atlético, artístico, liderazgo y emprendimiento. La beca socioeconómica cubre entre el 5% y el 25% de la colegiatura y casi siempre viene combinada con un préstamo educativo del mismo porcentaje, que se paga después de graduarte en máximo 1.5 veces la duración de la carrera. El ITAM otorga becas a fondo perdido a aproximadamente el 30% de sus estudiantes.",
-            "minutos": "4 min",
-            "datos": ["Becas del 5% al 70%", "Préstamo educativo post-graduación", "ITAM: 30% de alumnos con beca"],
-        },
-    ]
+    # Los 5 artículos de ejemplo (redactados internamente, sin autor real) se
+    # quitaron a propósito. A partir de ahora este espacio es para artículos
+    # reales, firmados por investigadores/especialistas. Para publicar uno
+    # nuevo, agrega un diccionario a la lista `articulos` con esta forma
+    # (el campo "autor" se muestra debajo del tag; déjalo vacío si no aplica):
+    #
+    # articulos = [
+    #     {
+    #         "tag": "Examen de admisión",
+    #         "titulo": "Título del artículo",
+    #         "autor": "Nombre Apellido — Doctorado en Educación, Universidad X",
+    #         "resumen": "Texto del artículo o resumen...",
+    #         "minutos": "5 min",
+    #         "datos": ["Dato destacado 1", "Dato destacado 2"],
+    #     },
+    #     ...
+    # ]
+    articulos = []
 
-    for art in articulos:
-        datos_html = "".join([f'<span style="background:#F7F7F5;color:#444;font-size:0.75rem;padding:4px 10px;border-radius:8px;margin-right:6px;">{d}</span>' for d in art["datos"]])
-        st.markdown(f"""
-        <div style="padding:28px;border:1px solid #EAEAEA;border-radius:10px;margin-bottom:16px;background:#FFFFFF;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                <span style="background:#EEF1E9;color:#4A5D32;font-size:0.72rem;font-weight:600;padding:3px 10px;border-radius:12px;">{art['tag']}</span>
-                <span style="font-size:0.78rem;color:#AAAAAA;">{art['minutos']} de lectura</span>
-            </div>
-            <h3 style="font-size:1.2rem;font-weight:700;color:#1A1A1A;margin-bottom:10px;">{art['titulo']}</h3>
-            <p style="font-size:0.95rem;color:#555555;line-height:1.7;margin-bottom:14px;">{art['resumen']}</p>
-            <div>{datos_html}</div>
+    if not articulos:
+        st.markdown("""
+        <div style="max-width:860px;margin:2rem auto;padding:40px 32px;border:1px dashed #DCDCDC;
+            border-radius:12px;text-align:center;background:#FAFAF8;">
+            <p style="font-size:1rem;color:#555555;line-height:1.7;margin:0;">
+                Estamos preparando artículos nuevos, escritos por investigadores y especialistas
+                en educación. Vuelve pronto.
+            </p>
         </div>
         """, unsafe_allow_html=True)
+    else:
+        for art in articulos:
+            datos_html = "".join([f'<span style="background:#F7F7F5;color:#444;font-size:0.75rem;padding:4px 10px;border-radius:8px;margin-right:6px;">{d}</span>' for d in art.get("datos", [])])
+            autor_html = (
+                f'<p style="font-size:0.82rem;color:#4A5D32;font-weight:600;margin:0 0 10px;">{art["autor"]}</p>'
+                if art.get("autor") else ""
+            )
+            st.markdown(f"""
+            <div style="padding:28px;border:1px solid #EAEAEA;border-radius:10px;margin-bottom:16px;background:#FFFFFF;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <span style="background:#EEF1E9;color:#4A5D32;font-size:0.72rem;font-weight:600;padding:3px 10px;border-radius:12px;">{art['tag']}</span>
+                    <span style="font-size:0.78rem;color:#AAAAAA;">{art['minutos']} de lectura</span>
+                </div>
+                <h3 style="font-size:1.2rem;font-weight:700;color:#1A1A1A;margin-bottom:6px;">{art['titulo']}</h3>
+                {autor_html}
+                <p style="font-size:0.95rem;color:#555555;line-height:1.7;margin-bottom:14px;">{art['resumen']}</p>
+                <div>{datos_html}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # --- VISTA: REGISTRO ---
@@ -4336,8 +4389,8 @@ elif st.session_state.page == "locker":
            "<div style='max-width:680px;margin:0 auto;background:#FAEEDA;border-radius:12px;padding:28px 32px;'>"
            "<h3 style='margin-top:0;color:#5F4B1E;font-size:1.15rem;'>El Locker Digital no está disponible todavía</h3>"
            "<p style='font-size:0.92rem;color:#5F4B1E;line-height:1.7;margin-bottom:0;'>"
-           "Por ser menor de edad, el Locker guarda documentos sensibles (acta, CURP, identificación, "
-           "comprobante) solo hasta que tu padre, madre o tutor legal confirme por correo. "
+           "Por ser menor de edad, el Locker guarda tus documentos académicos "
+           "solo hasta que tu padre, madre o tutor legal confirme por correo. "
            "<strong>En cuanto confirme, el Locker se desbloquea solo</strong> — no necesitas hacer nada más "
            "que cerrar sesión y volver a entrar. Mientras tanto puedes seguir usando a Hugo y el Simulador "
            "con normalidad. ¿Tu tutor no encuentra el correo? Puedes reenviarlo desde "
@@ -4416,28 +4469,24 @@ elif st.session_state.page == "locker":
         st.markdown("<div style='height:100%;'></div>", unsafe_allow_html=True)  # espacio vacío
 
     # ── Sección: Documentos personales ───────────────────────────────────────
+    # NOTA: el Locker ya NO guarda ningún documento de identidad (ni acta de
+    # nacimiento, ni identificación oficial, ni foto — además de CURP y
+    # comprobante de domicilio que ya se habían quitado antes). Uniwebmx solo
+    # almacena lo estrictamente funcional para armar el expediente académico;
+    # los documentos de identidad se entregan directo a cada universidad.
     st.markdown("""
     <div style="margin: 2.5rem 0 1rem;">
-        <p style="font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#AAAAAA;margin-bottom:6px;font-family:Montserrat,sans-serif;">Documentos personales</p>
-        <p style="font-size:0.9rem;color:#666;margin:0;">Los que el gobierno expide. Súbelos escaneados o en foto.</p>
+        <p style="font-size:10px;letter-spacing:0.09em;text-transform:uppercase;color:#AAAAAA;margin-bottom:6px;font-family:Montserrat,sans-serif;">Documentos de identidad</p>
+    </div>
+    <div style="max-width:100%;padding:20px 24px;border:1px solid #EAEAEA;border-radius:10px;background:#FAFAF8;margin-bottom:2rem;">
+        <p style="font-size:0.9rem;color:#555555;line-height:1.7;margin:0;">
+            Uniwebmx no solicita ni almacena documentos de identidad (acta de nacimiento,
+            identificación oficial, CURP, comprobante de domicilio, fotografía). La mayoría de las
+            universidades sí los van a pedir en algún punto de su proceso de admisión — revisa el
+            requisito exacto en la página oficial de cada una y entrégaselos directamente a ellas.
+        </p>
     </div>
     """, unsafe_allow_html=True)
-
-    cp1, cp2, cp3 = st.columns(3)
-    with cp1:
-        _doc_slot("acta", "Acta de nacimiento", "Original escaneada o copia certificada.", ["pdf","jpg","png"])
-    with cp2:
-        _doc_slot("curp", "CURP", "Descárgala en gob.mx si no la tienes.", ["pdf","jpg","png"])
-    with cp3:
-        _doc_slot("identificacion", "Identificación oficial", "INE, pasaporte o credencial de tu prepa.", ["pdf","jpg","png"])
-
-    cp4, cp5, cp6 = st.columns(3)
-    with cp4:
-        _doc_slot("foto", "Foto credencial", "Fondo blanco, reciente, formato infantil o credencial.", ["jpg","png"])
-    with cp5:
-        _doc_slot("comprobante", "Comprobante de domicilio", "Recibo de luz, agua o teléfono reciente.", ["pdf","jpg","png"])
-    with cp6:
-        st.markdown("<div style='height:100%;'></div>", unsafe_allow_html=True)
 
     st.markdown("<div style='margin-bottom:3rem;'></div>", unsafe_allow_html=True)
 
