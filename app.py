@@ -3673,36 +3673,41 @@ def _cargar_blog_posts(solo_publicados=True):
 
 
 def _crear_blog_post(tag, titulo, autor, resumen, minutos, datos_lista, publicado=True):
+    """Devuelve (ok: bool, error: str|None). Antes devolvía solo True/False y
+    el error quedaba atrapado en silencio (solo se mandaba por correo al
+    admin, si ADMIN_EMAIL estaba configurado) — en la UI parecía que
+    "no pasaba nada" al guardar. Ahora el mensaje real de Supabase se
+    regresa para mostrarlo directo en el Panel."""
     try:
         supabase_client.table("blog_posts").insert({
             "tag": tag, "titulo": titulo, "autor": autor, "resumen": resumen,
             "minutos": minutos, "datos": datos_lista, "publicado": publicado,
         }).execute()
         _cargar_blog_posts.clear()
-        return True
+        return True, None
     except Exception as e:
         _notificar_error_admin("_crear_blog_post", e, extra=f"titulo={titulo}")
-        return False
+        return False, str(e)
 
 
 def _actualizar_blog_post(post_id, cambios: dict):
     try:
         supabase_client.table("blog_posts").update(cambios).eq("id", post_id).execute()
         _cargar_blog_posts.clear()
-        return True
+        return True, None
     except Exception as e:
         _notificar_error_admin("_actualizar_blog_post", e, extra=f"id={post_id}")
-        return False
+        return False, str(e)
 
 
 def _eliminar_blog_post(post_id):
     try:
         supabase_client.table("blog_posts").delete().eq("id", post_id).execute()
         _cargar_blog_posts.clear()
-        return True
+        return True, None
     except Exception as e:
         _notificar_error_admin("_eliminar_blog_post", e, extra=f"id={post_id}")
-        return False
+        return False, str(e)
 
 
 # =================================================================
@@ -5854,9 +5859,12 @@ elif st.session_state.page == "panel_blog":
                 st.error("El título y el contenido son obligatorios.")
             else:
                 _b_datos_lista = [d.strip() for d in _b_datos_raw.splitlines() if d.strip()]
-                if _crear_blog_post(_b_tag.strip(), _b_titulo.strip(), _b_autor.strip(), _b_resumen.strip(), _b_minutos.strip(), _b_datos_lista, _b_publicado):
+                _ok, _err = _crear_blog_post(_b_tag.strip(), _b_titulo.strip(), _b_autor.strip(), _b_resumen.strip(), _b_minutos.strip(), _b_datos_lista, _b_publicado)
+                if _ok:
                     st.success(f"'{_b_titulo}' se guardó correctamente.")
                     st.rerun()
+                else:
+                    st.error(f"No se pudo guardar. Error de Supabase: {_err}")
 
     st.markdown("<div style='margin:1.5rem 0 1rem;'></div>", unsafe_allow_html=True)
 
@@ -5889,17 +5897,23 @@ elif st.session_state.page == "panel_blog":
 
                 if _e_guardar:
                     _e_datos_lista = [d.strip() for d in _e_datos_raw.splitlines() if d.strip()]
-                    if _actualizar_blog_post(_post["id"], {
+                    _ok, _err = _actualizar_blog_post(_post["id"], {
                         "tag": _e_tag.strip(), "titulo": _e_titulo.strip(), "autor": _e_autor.strip(),
                         "resumen": _e_resumen.strip(), "minutos": _e_minutos.strip(),
                         "datos": _e_datos_lista, "publicado": _e_publicado,
-                    }):
+                    })
+                    if _ok:
                         st.success("Actualizado.")
                         st.rerun()
+                    else:
+                        st.error(f"No se pudo actualizar. Error de Supabase: {_err}")
                 if _e_borrar:
-                    if _eliminar_blog_post(_post["id"]):
+                    _ok, _err = _eliminar_blog_post(_post["id"])
+                    if _ok:
                         st.success("Artículo eliminado.")
                         st.rerun()
+                    else:
+                        st.error(f"No se pudo eliminar. Error de Supabase: {_err}")
 
 # --- VISTA: CONFIRMACIÓN DEL TUTOR (doble opt-in para cuentas de menores de edad) ---
 elif st.session_state.page == "confirmar_tutor":
