@@ -63,10 +63,44 @@ import traceback as _traceback_mod
 
 _ULTIMA_ALERTA_POR_CONTEXTO = {}  # antispam: no mandar el mismo error 50 veces seguidas
 
+
+def _log_uso_api(username, tipo):
+    """Registra cada llamada a la API de Gemini para poder ver consumo por
+    alumno/preparatoria en el Panel → Errores y APIs. Requiere:
+        create table log_uso_api (
+            id bigint generated always as identity primary key,
+            username text, tipo text,
+            creado_en timestamptz not null default now()
+        );
+    Si la tabla no existe todavía, no truena nada — solo no se registra."""
+    try:
+        supabase_client.table("log_uso_api").insert({
+            "username": username or "", "tipo": tipo,
+        }).execute()
+    except Exception:
+        pass
+
 def _notificar_error_admin(contexto: str, error: Exception, extra: str = ""):
     """Manda un correo al admin cuando algo truena en un flujo importante
     (guardar datos, registro, login, pagos). Nunca deja que una falla aquí
-    tumbe la app: si Resend o los secrets fallan, solo se queda en consola."""
+    tumbe la app: si Resend o los secrets fallan, solo se queda en consola.
+    También guarda el error en Supabase (tabla "log_errores") para que se
+    pueda ver en tiempo real desde el Panel → Errores y APIs, sin depender
+    de revisar el correo. Requiere:
+        create table log_errores (
+            id bigint generated always as identity primary key,
+            contexto text, error text, extra text,
+            resuelto boolean not null default false,
+            creado_en timestamptz not null default now()
+        );
+    """
+    try:
+        supabase_client.table("log_errores").insert({
+            "contexto": contexto, "error": str(error)[:2000], "extra": (extra or "")[:1000],
+        }).execute()
+    except Exception:
+        pass  # si esta tabla no existe todavía, no debe tumbar nada
+
     try:
         _admin_correo = st.secrets.get("ADMIN_EMAIL", "")
         if not _admin_correo:
@@ -383,7 +417,8 @@ def save_user(username, password, email="", edad=None, es_menor_edad=False,
               tutor_nombre="", tutor_email="", tutor_consentimiento=False,
               tutor_confirm_token=None, tutor_confirm_token_expiry=None,
               consentimiento_hugo=False, consentimiento_universidades=False,
-              consentimiento_promocional=False, consentimientos_fecha=None):
+              consentimiento_promocional=False, consentimientos_fecha=None,
+              institucion_id=None, rol="alumno"):
     """
     Guarda un nuevo usuario.
 
@@ -426,6 +461,8 @@ def save_user(username, password, email="", edad=None, es_menor_edad=False,
         "consentimiento_universidades": consentimiento_universidades,
         "consentimiento_promocional": consentimiento_promocional,
         "consentimientos_fecha": consentimientos_fecha,
+        "institucion_id": institucion_id,
+        "rol": rol,
     }
     # IMPORTANTE: usamos insert() y no upsert(). Un registro nuevo NUNCA debe poder
     # sobreescribir una cuenta existente (eso borraría su password_hash, plan, etc.
@@ -684,7 +721,7 @@ def restaurar_sesion_usuario(username):
         _res_menor = supabase_client.table("usuarios").select(
             "es_menor_edad, tutor_confirmado, tutor_nombre, tutor_email, "
             "consentimiento_hugo, consentimiento_universidades, consentimiento_promocional, "
-            "rol, universidad_asignada"
+            "rol, universidad_asignada, institucion_id"
         ).eq("username", username).execute()
         if _res_menor.data:
             _row_menor = _res_menor.data[0]
@@ -697,16 +734,19 @@ def restaurar_sesion_usuario(username):
             st.session_state.consentimiento_promocional_actual = bool(_row_menor.get("consentimiento_promocional", False))
             st.session_state.rol_usuario = _row_menor.get("rol", "alumno") or "alumno"
             st.session_state.universidad_asignada = _row_menor.get("universidad_asignada", "") or ""
+            st.session_state.institucion_id_actual = _row_menor.get("institucion_id")
         else:
             st.session_state.es_menor_edad_actual = False
             st.session_state.tutor_confirmado_actual = False
             st.session_state.rol_usuario = "alumno"
             st.session_state.universidad_asignada = ""
+            st.session_state.institucion_id_actual = None
     except Exception:
         st.session_state.es_menor_edad_actual = False
         st.session_state.tutor_confirmado_actual = False
         st.session_state.rol_usuario = "alumno"
         st.session_state.universidad_asignada = ""
+        st.session_state.institucion_id_actual = None
 
 
 def es_usuario_menor():
@@ -797,7 +837,7 @@ def _tutor_confirmado_fresco(username):
 PANEL_ADMIN_PAGES = [
     "panel_admin", "panel_chat", "panel_simulador",
     "panel_carreras", "panel_perfiles", "panel_carreras_perfiles", "panel_consultor", "panel_usuarios",
-    "panel_blog",
+    "panel_blog", "panel_prepa", "panel_instituciones", "panel_errores_apis",
 ]
 
 
@@ -813,8 +853,21 @@ def es_universidad():
     return rol_usuario_actual() == "universidad"
 
 
+def es_institucion():
+    return rol_usuario_actual() == "institucion"
+
+
+def es_profesor():
+    return rol_usuario_actual() == "profesor"
+
+
+def es_staff_prepa():
+    """Cuenta de preparatoria (institución u orientador/profesor)."""
+    return es_institucion() or es_profesor()
+
+
 def puede_ver_panel():
-    return rol_usuario_actual() in ("admin", "universidad")
+    return rol_usuario_actual() in ("admin", "universidad", "institucion", "profesor")
 
 
 # --- Archivos binarios en Supabase Storage ---
@@ -1320,6 +1373,7 @@ def _interpretar_conversacion_orientacion(historial_qna):
     try:
         model_interp = genai.GenerativeModel(GEMINI_MODEL, system_instruction=prompt_sistema)
         respuesta_interp = model_interp.generate_content(transcript)
+        _log_uso_api(st.session_state.get("user", ""), "orientacion_vocacional")
         texto_interp = respuesta_interp.text.strip().replace("```json", "").replace("```", "").strip()
         data = json.loads(texto_interp)
         if "riasec" not in data or "ipip" not in data:
@@ -1453,6 +1507,7 @@ def buscar_info_actualizada_universidad(universidad, pregunta_alumno):
             ),
         )
         texto = (respuesta.text or "").strip()
+        _log_uso_api(st.session_state.get("user", ""), "busqueda_grounding")
         return texto or None
     except Exception:
         # No interrumpir el chat por esto: Hugo sigue con la base estática.
@@ -1489,7 +1544,13 @@ st.set_page_config(
    page_title="Uniwebmx - Admisiones Inteligentes",
    page_icon="logo_chrome.png",
    layout="wide",
-   initial_sidebar_state="expanded"
+   # Antes: initial_sidebar_state="expanded" hacía que, justo al iniciar
+   # sesión y entrar al Hub, Streamlit abriera la sidebar de golpe (como
+   # overlay en celular) sin que el usuario la pidiera — eso es el "salto"
+   # que se sentía en el login. La dejamos colapsada por defecto: el botón
+   # redondo verde (collapsedControl) sigue ahí para abrirla con un tap,
+   # pero ya no se despliega sola encima del contenido al aterrizar.
+   initial_sidebar_state="collapsed"
 )
 
 # --- PWA: "Agregar a pantalla de inicio" con nombre e ícono propios ---
@@ -1761,6 +1822,20 @@ elif st.session_state.page == "panel_blog" and not es_admin():
     # El blog es contenido propio de Uniwebmx, no algo que gestione una
     # universidad — mismo criterio que panel_usuarios.
     st.session_state.page = "panel_admin"
+elif st.session_state.page == "panel_instituciones" and not es_admin():
+    # Configurar preparatorias/accesos es exclusivo del equipo de Uniwebmx.
+    st.session_state.page = "panel_prepa" if es_staff_prepa() else "panel_admin"
+elif st.session_state.page == "panel_errores_apis" and not es_admin():
+    # Igual: es información técnica interna, no algo para universidades/prepas.
+    st.session_state.page = "panel_prepa" if es_staff_prepa() else "panel_admin"
+elif st.session_state.page == "panel_prepa" and not (es_staff_prepa() or es_admin()):
+    # El dashboard de preparatoria es para institución/profesor (y admin, para
+    # poder darles soporte) — no para universidades.
+    st.session_state.page = "panel_admin"
+elif st.session_state.page in PANEL_ADMIN_PAGES and st.session_state.page not in ("panel_prepa", "panel_instituciones") and es_staff_prepa():
+    # Una cuenta de institución/profesor no tiene nada que hacer en el panel
+    # de administrador/universidades — su única página es panel_prepa.
+    st.session_state.page = "panel_prepa"
 elif st.session_state.page == "panel_chat" and es_universidad():
     # "Uso de Hugo (chat)" es una métrica de producto para Uniwebmx, no algo
     # que le sirva a una universidad. Ya no aparece en su sidebar, pero por si
@@ -1902,6 +1977,9 @@ st.markdown(f"""
 
    /* Ocultar barra lateral en páginas públicas */
    {"[data-testid='stSidebar'] {display: none;}" if not es_hub and not es_panel else ""}
+   [data-testid="stSidebar"] {{
+       transition: margin-left 0.25s ease, transform 0.25s ease !important;
+   }}
   
    /* Elminar el texto basura "keyboard_double..." del botón colapsable nativo de Streamlit */
    [data-testid="stSidebarCollapseButton"] button span {{
@@ -2945,9 +3023,23 @@ if es_panel:
    _icon_consultor  = '<path d="M12 2a7 7 0 0 0-7 7c0 3 2 4 2 7h10c0-3 2-4 2-7a7 7 0 0 0-7-7z"/><path d="M9 21h6"/>'
    _icon_usuarios   = '<circle cx="9" cy="7" r="4"/><path d="M2 21c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M17 8a3 3 0 1 1 0 6"/><path d="M22 21c0-2.5-1.8-4.5-4.3-5.4"/>'
    _icon_blog       = '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/>'
+   _icon_instituciones = '<path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/>'
+   _icon_errores = '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>'
 
    with st.sidebar:
-       if _es_uni_panel:
+       if es_staff_prepa():
+           st.markdown(f"""
+           <div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">
+               <span style="font-size:15px;font-weight:600;color:#1A1A1A;letter-spacing:-0.03em;">uniwebmx</span>
+               <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;
+                   color:#4A5D32;margin-top:2px;">Panel de la preparatoria</div>
+           </div>
+           <div style="padding:12px 10px 0;">
+               {_sb_item_panel("Resumen", "panel_prepa", _icon_resumen)}
+           </div>
+           <div style="border-top:0.5px solid #EAEAEA;margin:12px 16px 8px;"></div>
+           """, unsafe_allow_html=True)
+       elif _es_uni_panel:
            st.markdown(f"""
            <div style="padding:20px 16px 14px;border-bottom:0.5px solid #EAEAEA;margin-bottom:6px;">
                <span style="font-size:15px;font-weight:600;color:#1A1A1A;letter-spacing:-0.03em;">uniwebmx</span>
@@ -2987,6 +3079,8 @@ if es_panel:
               f'<div style="padding:0 10px;">'
               f'{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}'
               f'{_sb_item_panel("Blog", "panel_blog", _icon_blog)}'
+              f'{_sb_item_panel("Preparatorias y accesos", "panel_instituciones", _icon_instituciones)}'
+              f'{_sb_item_panel("Errores y APIs", "panel_errores_apis", _icon_errores)}'
               f'</div>'
               if es_admin() else "")
            + """
@@ -3481,6 +3575,7 @@ def _panel_generar_perfil_universidad_ia(nombre_uni, sub_df):
             ),
         )
         respuesta = model.generate_content(resumen_stats)
+        _log_uso_api(st.session_state.get("user", ""), "panel_perfil_universidad_ia")
         return _quitar_emojis(respuesta.text)
     except Exception as e:
         return f"No se pudo generar el análisis con Hugo en este momento ({e})."
@@ -3562,6 +3657,7 @@ def _panel_responder_consultor(pregunta, df, historial):
         )
         chat = model.start_chat(history=historial_gemini[:-1])
         respuesta = chat.send_message(pregunta)
+        _log_uso_api(st.session_state.get("user", ""), "consultor_panel")
         return _quitar_emojis(respuesta.text)
     except Exception as e:
         return f"No pude procesar tu pregunta en este momento ({e})."
@@ -3708,6 +3804,235 @@ def _eliminar_blog_post(post_id):
     except Exception as e:
         _notificar_error_admin("_eliminar_blog_post", e, extra=f"id={post_id}")
         return False, str(e)
+
+
+# =================================================================
+# PREPARATORIAS: instituciones + accesos de profesores/institución
+# Requiere en Supabase (correr una sola vez en el SQL Editor):
+#
+#   create table instituciones (
+#       id bigint generated always as identity primary key,
+#       nombre text not null,
+#       dominio_correo text not null unique,  -- ej. 'prepatec.mx', SIN @
+#       activo boolean not null default true,
+#       creado_en timestamptz not null default now()
+#   );
+#
+#   create table accesos_institucion (
+#       id bigint generated always as identity primary key,
+#       correo text not null unique,          -- correo exacto, minúsculas
+#       institucion_id bigint not null references instituciones(id) on delete cascade,
+#       rol_asignado text not null default 'profesor',  -- 'profesor' | 'institucion'
+#       nombre text default '',
+#       creado_en timestamptz not null default now()
+#   );
+#
+#   alter table usuarios add column if not exists institucion_id bigint references instituciones(id);
+#
+#   create table indices_preparacion (
+#       username text primary key references usuarios(username) on delete cascade,
+#       puntaje int,
+#       fortalezas jsonb default '[]'::jsonb,
+#       pendientes jsonb default '[]'::jsonb,
+#       calculado_en timestamptz
+#   );
+# =================================================================
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _cargar_instituciones():
+    try:
+        res = supabase_client.table("instituciones").select("*").order("nombre").execute()
+        return res.data or []
+    except Exception:
+        return []
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _cargar_accesos_institucion():
+    try:
+        res = supabase_client.table("accesos_institucion").select("*, instituciones(nombre)").order("correo").execute()
+        return res.data or []
+    except Exception:
+        return []
+
+
+def _resolver_institucion_y_rol(email):
+    """Se llama en el registro. Si el dominio del correo coincide con una
+    institución activa: liga institucion_id automáticamente (para que sus
+    datos cuenten en el dashboard de esa prepa). Si además ese correo EXACTO
+    está en la lista de accesos (agregada a mano por el admin), le da el rol
+    'profesor' o 'institucion' en vez de 'alumno'.
+    Devuelve (institucion_id: int|None, rol: str)."""
+    try:
+        _correo = (email or "").strip().lower()
+        if "@" not in _correo:
+            return None, "alumno"
+        _dominio = _correo.split("@", 1)[1]
+        _res_inst = supabase_client.table("instituciones").select("id").eq("dominio_correo", _dominio).eq("activo", True).execute()
+        if not _res_inst.data:
+            return None, "alumno"
+        _institucion_id = _res_inst.data[0]["id"]
+
+        _res_acceso = supabase_client.table("accesos_institucion").select("rol_asignado").eq("correo", _correo).execute()
+        if _res_acceso.data:
+            _rol = _res_acceso.data[0].get("rol_asignado", "profesor")
+            if _rol not in ("profesor", "institucion"):
+                _rol = "profesor"
+            return _institucion_id, _rol
+        return _institucion_id, "alumno"
+    except Exception as e:
+        _notificar_error_admin("_resolver_institucion_y_rol", e, extra=f"email={email}")
+        return None, "alumno"
+
+
+def _crear_institucion(nombre, dominio_correo):
+    try:
+        supabase_client.table("instituciones").insert({
+            "nombre": nombre.strip(), "dominio_correo": dominio_correo.strip().lower().lstrip("@"),
+        }).execute()
+        _cargar_instituciones.clear()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def _actualizar_institucion(institucion_id, cambios: dict):
+    try:
+        supabase_client.table("instituciones").update(cambios).eq("id", institucion_id).execute()
+        _cargar_instituciones.clear()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def _eliminar_institucion(institucion_id):
+    try:
+        supabase_client.table("instituciones").delete().eq("id", institucion_id).execute()
+        _cargar_instituciones.clear()
+        _cargar_accesos_institucion.clear()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def _crear_acceso_institucion(correo, institucion_id, rol_asignado, nombre=""):
+    try:
+        supabase_client.table("accesos_institucion").insert({
+            "correo": correo.strip().lower(), "institucion_id": institucion_id,
+            "rol_asignado": rol_asignado, "nombre": nombre.strip(),
+        }).execute()
+        _cargar_accesos_institucion.clear()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def _eliminar_acceso_institucion(acceso_id):
+    try:
+        supabase_client.table("accesos_institucion").delete().eq("id", acceso_id).execute()
+        _cargar_accesos_institucion.clear()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+# --- ÍNDICE DE PREPARACIÓN (Hugo evalúa qué tan lista está la aplicación de
+# un alumno, 0-100). Se calcula bajo demanda (botón "Recalcular"), NUNCA
+# automático en cada vista — cada cálculo es una llamada a Gemini y no
+# queremos quemar la cuota de API solo por abrir un dashboard. ---
+
+def _calcular_indice_preparacion_ia(username):
+    """Junta las señales del perfil del alumno y le pide a Gemini un
+    puntaje 0-100 con fortalezas/pendientes. Devuelve dict o None si falla."""
+    datos = cargar_datos_usuario(username)
+
+    def _tiene(doc_key):
+        return bool((datos.get(doc_key) or {}).get("nombre"))
+
+    resultado_sim = datos.get("resultados_simulador") or {}
+    señales = {
+        "perfil_completo": datos.get("perfil_completo", False),
+        "carreras_de_interes": datos.get("perfil_carreras", []),
+        "universidades_de_interes": datos.get("perfil_universidades_interes", []),
+        "universidades_en_aplicacion_activa": datos.get("unis_seleccionadas", []),
+        "hizo_test_de_orientacion_vocacional": bool(datos.get("resultados_orientacion")),
+        "uso_el_simulador_de_probabilidades": datos.get("simulador_usado", False),
+        "promedio_capturado_en_simulador": resultado_sim.get("promedio"),
+        "examen_capturado_en_simulador": resultado_sim.get("examen"),
+        "documentos_subidos": {
+            "kardex": _tiene("kardex"), "ensayo_o_carta_de_motivos": _tiene("ensayo"),
+            "curriculum": _tiene("curriculum"), "cartas_de_recomendacion": _tiene("cartas"),
+            "portafolio": _tiene("portafolio"),
+        },
+    }
+    prompt_sistema = (
+        "Eres Hugo, el consultor de admisión universitaria de Uniwebmx. Vas a evaluar qué tan "
+        "lista está la aplicación de un estudiante de preparatoria a partir de estas señales de "
+        "su perfil (en JSON). Considera completo un perfil que tiene: intereses de carrera "
+        "definidos, al menos una universidad de interés, el test de orientación vocacional hecho, "
+        "el simulador usado con promedio/examen capturados, y los documentos académicos clave "
+        "subidos (kárdex, ensayo, cartas de recomendación).\n\n"
+        "Responde ÚNICAMENTE con un objeto JSON válido, sin texto antes ni después, sin backticks, "
+        "exactamente con esta forma:\n"
+        '{"puntaje": 0, "fortalezas": ["..."], "pendientes": ["..."]}\n\n'
+        "\"puntaje\" es un entero de 0 a 100. \"fortalezas\" y \"pendientes\" son listas de 2 a 4 "
+        "frases cortas y concretas (máximo 12 palabras cada una), en español, dirigidas al propio "
+        "estudiante o a su orientador — nada genérico."
+    )
+    try:
+        model = genai.GenerativeModel(GEMINI_MODEL, system_instruction=prompt_sistema)
+        respuesta = model.generate_content(json.dumps(señales, ensure_ascii=False))
+        _log_uso_api(username, "indice_preparacion")
+        texto = respuesta.text.strip().replace("```json", "").replace("```", "").strip()
+        data = json.loads(texto)
+        if "puntaje" not in data:
+            return None
+        data["puntaje"] = max(0, min(100, int(data["puntaje"])))
+        data.setdefault("fortalezas", [])
+        data.setdefault("pendientes", [])
+        return data
+    except Exception as e:
+        _notificar_error_admin("_calcular_indice_preparacion_ia", e, extra=f"username={username}")
+        return None
+
+
+def _obtener_indice_preparacion(username, forzar=False, dias_valido=14):
+    """Devuelve el índice guardado si está fresco; si no (o forzar=True),
+    lo recalcula con Gemini y lo guarda. Devuelve None si nunca se ha
+    calculado y el recálculo también falla."""
+    try:
+        res = supabase_client.table("indices_preparacion").select("*").eq("username", username).execute()
+        _fila = res.data[0] if res.data else None
+    except Exception:
+        _fila = None
+
+    _fresco = False
+    if _fila and _fila.get("calculado_en"):
+        try:
+            _fecha = datetime.fromisoformat(_fila["calculado_en"].replace("Z", "+00:00"))
+            _fresco = (datetime.now(timezone.utc) - _fecha).days < dias_valido
+        except Exception:
+            _fresco = False
+
+    if _fila and _fresco and not forzar:
+        return _fila
+
+    nuevo = _calcular_indice_preparacion_ia(username)
+    if nuevo is None:
+        return _fila  # si el recálculo falla, mejor un dato viejo que nada
+
+    _registro = {
+        "username": username,
+        "puntaje": nuevo["puntaje"],
+        "fortalezas": nuevo["fortalezas"],
+        "pendientes": nuevo["pendientes"],
+        "calculado_en": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        supabase_client.table("indices_preparacion").upsert(_registro).execute()
+    except Exception as e:
+        _notificar_error_admin("_obtener_indice_preparacion (guardar)", e, extra=f"username={username}")
+    return _registro
 
 
 # =================================================================
@@ -4054,6 +4379,12 @@ elif st.session_state.page == "registro":
                             _token_tutor = _secrets_reg.token_urlsafe(32)
                             _token_tutor_expiry = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
 
+                        # Si el correo es de una preparatoria dada de alta (ej. @prepatec.mx),
+                        # esto liga la cuenta a esa institución automáticamente. Si además el
+                        # correo exacto está en la lista de accesos que agregó el admin, el rol
+                        # sale como "profesor" o "institucion" en vez de "alumno".
+                        _institucion_id_reg, _rol_reg = _resolver_institucion_y_rol(_email_val)
+
                         _creado_ok = save_user(
                             reg_nombre_limpio, reg_pass, _email_val,
                             edad=int(reg_edad),
@@ -4069,6 +4400,8 @@ elif st.session_state.page == "registro":
                             consentimiento_universidades=reg_consiente_unis if not _es_menor else False,
                             consentimiento_promocional=reg_consiente_promo if not _es_menor else False,
                             consentimientos_fecha=datetime.now(timezone.utc).isoformat() if not _es_menor else None,
+                            institucion_id=_institucion_id_reg,
+                            rol=_rol_reg,
                         )
                         if not _creado_ok:
                             # Puede ser que alguien más se haya registrado con ese username justo
@@ -4130,7 +4463,7 @@ elif st.session_state.page == "login":
                 restaurar_sesion_usuario(_login_username)
                 _log_evento(_login_username, "login")
                 if puede_ver_panel():
-                    cambiar_pagina("panel_admin")
+                    cambiar_pagina("panel_prepa" if es_staff_prepa() else "panel_admin")
                 elif st.session_state.get("perfil_completo"):
                     cambiar_pagina("locker")
                 else:
@@ -4593,6 +4926,40 @@ elif st.session_state.page == "mi_aplicacion":
     </div>
     """, unsafe_allow_html=True)
 
+    # --- Índice de preparación (lo mismo que ve tu prepa, calculado por Hugo).
+    # Bajo demanda: no se calcula solo, para no gastar cuota de Gemini cada
+    # vez que el alumno entra a esta página. ---
+    _idx_alumno = None
+    try:
+        _res_idx_alumno = supabase_client.table("indices_preparacion").select("*").eq("username", _user).execute()
+        _idx_alumno = _res_idx_alumno.data[0] if _res_idx_alumno.data else None
+    except Exception:
+        pass
+
+    with st.container():
+        st.markdown("<div style='max-width:680px;margin:0 auto 2rem;padding:24px 28px;border:1px solid #EAEAEA;border-radius:12px;background:#FAFAF8;'>", unsafe_allow_html=True)
+        col_idx1, col_idx2 = st.columns([1, 2])
+        with col_idx1:
+            if _idx_alumno and _idx_alumno.get("puntaje") is not None:
+                st.markdown(f"<div style='text-align:center;'><div style='font-size:2.4rem;font-weight:700;color:#4A5D32;'>{_idx_alumno['puntaje']}<span style='font-size:1rem;color:#AAA;'>/100</span></div><p style='font-size:0.78rem;color:#888;margin:0;'>Índice de preparación</p></div>", unsafe_allow_html=True)
+            else:
+                st.markdown("<div style='text-align:center;'><div style='font-size:1.5rem;color:#AAA;'>—</div><p style='font-size:0.78rem;color:#888;margin:0;'>Aún sin calcular</p></div>", unsafe_allow_html=True)
+        with col_idx2:
+            if _idx_alumno and _idx_alumno.get("pendientes"):
+                st.markdown("<p style='font-size:0.82rem;color:#555;margin:0 0 4px;font-weight:600;'>Qué te falta:</p>", unsafe_allow_html=True)
+                for _p in _idx_alumno["pendientes"][:3]:
+                    st.markdown(f"<p style='font-size:0.82rem;color:#666;margin:0;'>• {_p}</p>", unsafe_allow_html=True)
+            else:
+                st.markdown("<p style='font-size:0.85rem;color:#666;margin:0;'>Calcula tu índice para ver qué tan lista está tu aplicación y qué te hace falta.</p>", unsafe_allow_html=True)
+            if st.button("🔄 Recalcular" if _idx_alumno else "Calcular mi índice de preparación", key="btn_calc_idx_alumno"):
+                with st.spinner("Hugo está evaluando tu perfil..."):
+                    _res_calc = _obtener_indice_preparacion(_user, forzar=True)
+                if _res_calc and _res_calc.get("puntaje") is not None:
+                    st.rerun()
+                else:
+                    st.error("No se pudo calcular en este momento. Intenta de nuevo en un momento.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
     unis_elegidas = st.multiselect(
         "¿A qué universidades quieres aplicar?",
         options=list(UNIVERSIDADES_DATA.keys()),
@@ -5047,6 +5414,7 @@ elif st.session_state.page == "chat":
                     )
                     chat = model.start_chat(history=historial_gemini)
                     respuesta = chat.send_message(prompt_chat + info_doc)
+                    _log_uso_api(st.session_state.get("user", ""), "hugo_chat")
                     texto_hugo = _quitar_emojis(respuesta.text)
                     
                     # INCREMENTAR CONTADOR SOLO SI LA LLAMADA ES EXITOSA
@@ -5147,6 +5515,7 @@ elif st.session_state.page == "simulador":
                         )
                         model_ajuste = genai.GenerativeModel(GEMINI_MODEL)
                         respuesta_ajuste = model_ajuste.generate_content(prompt_ajuste)
+                        _log_uso_api(st.session_state.get("user", ""), "simulador_ajuste_ia")
                         texto_limpio = respuesta_ajuste.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
                         datos_ia = json.loads(texto_limpio)
 
@@ -5914,6 +6283,268 @@ elif st.session_state.page == "panel_blog":
                         st.rerun()
                     else:
                         st.error(f"No se pudo eliminar. Error de Supabase: {_err}")
+
+# --- VISTA: PREPARATORIAS Y ACCESOS (administración) ---
+elif st.session_state.page == "panel_instituciones":
+    _panel_header("Preparatorias y accesos", "Da de alta el dominio de correo de cada prepa y quién tiene acceso como profesor/institución.")
+
+    with st.expander("➕ Nueva preparatoria", expanded=False):
+        with st.form("form_nueva_institucion", clear_on_submit=True):
+            _i_nombre = st.text_input("Nombre de la preparatoria", placeholder="ej. Prepa Tec Campus Guadalajara")
+            _i_dominio = st.text_input("Dominio de correo institucional", placeholder="ej. prepatec.mx (sin @)")
+            _i_crear = st.form_submit_button("Crear preparatoria", use_container_width=True)
+        if _i_crear:
+            if not _i_nombre.strip() or not _i_dominio.strip():
+                st.error("Nombre y dominio son obligatorios.")
+            else:
+                _ok, _err = _crear_institucion(_i_nombre, _i_dominio)
+                if _ok:
+                    st.success(f"'{_i_nombre}' se creó correctamente. Cualquiera que se registre con un correo @{_i_dominio.strip().lower().lstrip('@')} quedará ligado a esta prepa automáticamente.")
+                    st.rerun()
+                else:
+                    st.error(f"No se pudo crear. Error de Supabase: {_err}")
+
+    st.markdown("<div style='margin:1.5rem 0 1rem;'></div>", unsafe_allow_html=True)
+    _instituciones_admin = _cargar_instituciones()
+
+    if not _instituciones_admin:
+        st.info("Todavía no hay preparatorias dadas de alta. Si acabas de crear las tablas en Supabase, esto es normal.")
+    else:
+        for _inst in _instituciones_admin:
+            with st.expander(f"{'🟢' if _inst.get('activo') else '⚪'} {_inst['nombre']} — @{_inst['dominio_correo']}", expanded=False):
+                col_i1, col_i2 = st.columns(2)
+                with col_i1:
+                    if st.button("Desactivar" if _inst.get("activo") else "Activar", key=f"toggle_inst_{_inst['id']}"):
+                        _ok, _err = _actualizar_institucion(_inst["id"], {"activo": not _inst.get("activo")})
+                        if _ok:
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {_err}")
+                with col_i2:
+                    if st.button("🗑️ Eliminar preparatoria", key=f"del_inst_{_inst['id']}"):
+                        _ok, _err = _eliminar_institucion(_inst["id"])
+                        if _ok:
+                            st.success("Eliminada.")
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {_err}")
+
+                st.markdown("<div style='margin:1rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Accesos de profesor/institución para esta prepa</strong></div>", unsafe_allow_html=True)
+                _accesos_de_esta = [a for a in _cargar_accesos_institucion() if a.get("institucion_id") == _inst["id"]]
+                if _accesos_de_esta:
+                    for _acc in _accesos_de_esta:
+                        col_a1, col_a2, col_a3 = st.columns([3, 2, 1])
+                        with col_a1:
+                            st.caption(f"{_acc['correo']}" + (f" — {_acc['nombre']}" if _acc.get("nombre") else ""))
+                        with col_a2:
+                            st.caption("Institución (vista general)" if _acc["rol_asignado"] == "institucion" else "Profesor/orientador")
+                        with col_a3:
+                            if st.button("Quitar", key=f"del_acc_{_acc['id']}"):
+                                _eliminar_acceso_institucion(_acc["id"])
+                                st.rerun()
+                else:
+                    st.caption("Todavía no hay accesos elevados — los alumnos con este dominio ya cuentan para el dashboard, pero nadie puede verlo aún.")
+
+                with st.form(f"form_nuevo_acceso_{_inst['id']}", clear_on_submit=True):
+                    _a_correo = st.text_input("Correo exacto", placeholder=f"orientacion@{_inst['dominio_correo']}", key=f"acc_correo_{_inst['id']}")
+                    _a_nombre = st.text_input("Nombre (opcional)", key=f"acc_nombre_{_inst['id']}")
+                    _a_rol = st.selectbox("Tipo de acceso", ["profesor", "institucion"], format_func=lambda r: "Profesor/orientador (ve alumnos individuales)" if r == "profesor" else "Institución (solo vista general)", key=f"acc_rol_{_inst['id']}")
+                    _a_agregar = st.form_submit_button("Agregar acceso", use_container_width=True)
+                if _a_agregar:
+                    if not _a_correo.strip():
+                        st.error("Escribe el correo.")
+                    else:
+                        _ok, _err = _crear_acceso_institucion(_a_correo, _inst["id"], _a_rol, _a_nombre)
+                        if _ok:
+                            st.success(f"Acceso agregado para {_a_correo}. La próxima vez que inicie sesión (o si se registra hoy) con ese correo, entrará como {_a_rol}.")
+                            st.rerun()
+                        else:
+                            st.error(f"No se pudo agregar. Error de Supabase: {_err}")
+        st.caption("Nota: si un profesor ya tenía cuenta de alumno antes de que lo agregaras aquí, su rol no cambia solo — bórralo desde 'Usuarios y roles' y dile que se vuelva a registrar, o cambia su rol ahí directamente.")
+
+# --- VISTA: PANEL DE LA PREPARATORIA (institución / profesor) ---
+elif st.session_state.page == "panel_prepa":
+    _mi_institucion_id = st.session_state.get("institucion_id_actual")
+
+    # El admin puede entrar aquí para dar soporte; como no tiene institución
+    # propia, le dejamos elegir cuál quiere ver.
+    if es_admin() and not _mi_institucion_id:
+        _todas_inst = _cargar_instituciones()
+        if not _todas_inst:
+            st.info("No hay preparatorias dadas de alta todavía. Créalas en 'Preparatorias y accesos'.")
+            st.stop()
+        _nombres_inst = {i["nombre"]: i["id"] for i in _todas_inst}
+        _elegida = st.selectbox("Viendo como (modo soporte admin):", list(_nombres_inst.keys()))
+        _mi_institucion_id = _nombres_inst[_elegida]
+
+    if not _mi_institucion_id:
+        st.info("Tu cuenta todavía no está ligada a ninguna preparatoria. Pídele al equipo de Uniwebmx que la dé de alta.")
+        st.stop()
+
+    try:
+        _res_alumnos_prepa = supabase_client.table("usuarios").select("username, email").eq("institucion_id", _mi_institucion_id).eq("rol", "alumno").execute()
+        _alumnos_prepa = _res_alumnos_prepa.data or []
+    except Exception as e:
+        st.error(f"No se pudo cargar la lista de alumnos: {e}")
+        _alumnos_prepa = []
+
+    _res_inst_actual = supabase_client.table("instituciones").select("nombre").eq("id", _mi_institucion_id).execute()
+    _nombre_inst_actual = _res_inst_actual.data[0]["nombre"] if _res_inst_actual.data else "tu preparatoria"
+
+    _panel_header(f"Resumen — {_nombre_inst_actual}", f"{len(_alumnos_prepa)} alumno(s) registrado(s) con correo institucional.")
+
+    if not _alumnos_prepa:
+        st.info("Todavía no hay alumnos de tu preparatoria registrados en Uniwebmx.")
+        st.stop()
+
+    # --- Intereses generales de la prepa (carreras y universidades) ---
+    _contador_carreras, _contador_unis = {}, {}
+    _datos_por_alumno = {}
+    for _al in _alumnos_prepa:
+        _d = cargar_datos_usuario(_al["username"])
+        _datos_por_alumno[_al["username"]] = _d
+        for _c in (_d.get("perfil_carreras") or []):
+            _contador_carreras[_c] = _contador_carreras.get(_c, 0) + 1
+        for _u in (_d.get("perfil_universidades_interes") or []):
+            _contador_unis[_u] = _contador_unis.get(_u, 0) + 1
+
+    col_int1, col_int2 = st.columns(2)
+    with col_int1:
+        st.markdown("<p style='font-size:0.85rem;font-weight:600;color:#444;margin-bottom:6px;'>Carreras de mayor interés</p>", unsafe_allow_html=True)
+        if _contador_carreras:
+            for _c, _n in sorted(_contador_carreras.items(), key=lambda x: -x[1])[:8]:
+                st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_c}</span><span style='color:#4A5D32;font-weight:600;'>{_n}</span></div>", unsafe_allow_html=True)
+        else:
+            st.caption("Aún no hay suficientes datos.")
+    with col_int2:
+        st.markdown("<p style='font-size:0.85rem;font-weight:600;color:#444;margin-bottom:6px;'>Universidades de mayor interés</p>", unsafe_allow_html=True)
+        if _contador_unis:
+            for _u, _n in sorted(_contador_unis.items(), key=lambda x: -x[1])[:8]:
+                st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_u}</span><span style='color:#4A5D32;font-weight:600;'>{_n}</span></div>", unsafe_allow_html=True)
+        else:
+            st.caption("Aún no hay suficientes datos.")
+
+    # --- Tabla por alumno con índice de preparación (solo profesor, o admin en modo soporte) ---
+    if es_profesor() or es_admin():
+        st.markdown("<div style='margin:2rem 0 1rem;'></div>", unsafe_allow_html=True)
+        st.markdown("<p style='font-size:0.85rem;font-weight:600;color:#444;'>Alumnos y su índice de preparación</p>", unsafe_allow_html=True)
+        st.caption("El índice lo calcula Hugo (IA) bajo demanda — no se recalcula solo, usa 'Calcular' o 'Recalcular' por alumno.")
+
+        try:
+            _res_indices = supabase_client.table("indices_preparacion").select("*").in_(
+                "username", [a["username"] for a in _alumnos_prepa]
+            ).execute()
+            _indices_por_user = {r["username"]: r for r in (_res_indices.data or [])}
+        except Exception:
+            _indices_por_user = {}
+
+        for _al in _alumnos_prepa:
+            _u = _al["username"]
+            _idx = _indices_por_user.get(_u)
+            with st.expander(f"{_u}" + (f" — {_idx['puntaje']}/100" if _idx and _idx.get("puntaje") is not None else " — sin calcular")):
+                if _idx and _idx.get("puntaje") is not None:
+                    st.markdown(f"<div style='font-size:1.8rem;font-weight:700;color:#4A5D32;'>{_idx['puntaje']}<span style='font-size:1rem;color:#AAA;'>/100</span></div>", unsafe_allow_html=True)
+                    if _idx.get("fortalezas"):
+                        st.markdown("**Fortalezas:**")
+                        for _f in _idx["fortalezas"]:
+                            st.markdown(f"- {_f}")
+                    if _idx.get("pendientes"):
+                        st.markdown("**Le falta:**")
+                        for _p in _idx["pendientes"]:
+                            st.markdown(f"- {_p}")
+                    st.caption(f"Calculado: {_idx.get('calculado_en', '')[:10]}")
+                else:
+                    st.caption("Todavía no se ha calculado el índice de este alumno.")
+
+                _btn_label = "🔄 Recalcular" if _idx else "Calcular índice"
+                if st.button(_btn_label, key=f"calc_idx_{_u}"):
+                    with st.spinner("Hugo está evaluando el perfil..."):
+                        _nuevo_idx = _obtener_indice_preparacion(_u, forzar=True)
+                    if _nuevo_idx and _nuevo_idx.get("puntaje") is not None:
+                        st.success("Listo.")
+                        st.rerun()
+                    else:
+                        st.error("No se pudo calcular en este momento. Intenta de nuevo en un momento.")
+
+# --- VISTA: ERRORES Y APIs (administración) ---
+elif st.session_state.page == "panel_errores_apis":
+    _panel_header("Errores y APIs", "Bugs recientes en tiempo real y consumo de la API de Gemini.")
+
+    _tab_errores, _tab_apis = st.tabs(["🐛 Errores", "📡 Uso de API"])
+
+    with _tab_errores:
+        _solo_no_resueltos = st.checkbox("Mostrar solo pendientes", value=True, key="chk_solo_no_resueltos")
+        try:
+            _q_errores = supabase_client.table("log_errores").select("*").order("creado_en", desc=True).limit(100)
+            if _solo_no_resueltos:
+                _q_errores = _q_errores.eq("resuelto", False)
+            _errores_data = _q_errores.execute().data or []
+        except Exception as e:
+            _errores_data = []
+            st.info("Todavía no existe la tabla 'log_errores' en Supabase, o está vacía. Corre el SQL indicado en el comentario de `_notificar_error_admin` para activarla.")
+
+        if _errores_data:
+            st.caption(f"{len(_errores_data)} error(es) mostrados (últimos 100 máximo).")
+            for _err_row in _errores_data:
+                _fecha_err = (_err_row.get("creado_en") or "")[:19].replace("T", " ")
+                with st.expander(f"🔴 {_err_row.get('contexto', '(sin contexto)')} — {_fecha_err}"):
+                    st.code(_err_row.get("error", ""), language=None)
+                    if _err_row.get("extra"):
+                        st.caption(f"Extra: {_err_row['extra']}")
+                    if not _err_row.get("resuelto"):
+                        if st.button("✅ Marcar como resuelto", key=f"resolver_err_{_err_row['id']}"):
+                            try:
+                                supabase_client.table("log_errores").update({"resuelto": True}).eq("id", _err_row["id"]).execute()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"No se pudo actualizar: {e}")
+        elif _solo_no_resueltos:
+            st.success("Sin errores pendientes. 🎉")
+
+    with _tab_apis:
+        _dias_ventana = st.selectbox("Ventana de tiempo", [7, 14, 30, 90], index=2, format_func=lambda d: f"Últimos {d} días", key="sel_dias_uso_api")
+        try:
+            _fecha_desde = (datetime.now(timezone.utc) - timedelta(days=_dias_ventana)).isoformat()
+            _res_uso = supabase_client.table("log_uso_api").select("username, tipo, creado_en").gte("creado_en", _fecha_desde).limit(20000).execute()
+            _uso_data = _res_uso.data or []
+        except Exception:
+            _uso_data = []
+            st.info("Todavía no existe la tabla 'log_uso_api' en Supabase, o está vacía. Revisa el comentario junto a `_log_uso_api` para el SQL.")
+
+        if _uso_data:
+            _df_uso = pd.DataFrame(_uso_data)
+            c_api1, c_api2, c_api3 = st.columns(3)
+            c_api1.metric("Llamadas totales", len(_df_uso))
+            c_api2.metric("Alumnos/cuentas distintas", _df_uso["username"].nunique())
+            c_api3.metric("Promedio diario", round(len(_df_uso) / max(_dias_ventana, 1), 1))
+
+            st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Llamadas por tipo</strong></div>", unsafe_allow_html=True)
+            _por_tipo = _df_uso["tipo"].value_counts()
+            for _tipo_nombre, _cant in _por_tipo.items():
+                st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_tipo_nombre}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
+
+            st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Top 10 cuentas con más consumo</strong></div>", unsafe_allow_html=True)
+            _top_users = _df_uso["username"].value_counts().head(10)
+            for _un, _cant in _top_users.items():
+                st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_un}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
+
+            # --- Consumo por preparatoria ---
+            st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Consumo por preparatoria</strong></div>", unsafe_allow_html=True)
+            try:
+                _res_usuarios_inst = supabase_client.table("usuarios").select("username, institucion_id").not_.is_("institucion_id", "null").execute()
+                _mapa_user_inst = {r["username"]: r["institucion_id"] for r in (_res_usuarios_inst.data or [])}
+                _instituciones_map = {i["id"]: i["nombre"] for i in _cargar_instituciones()}
+                _df_uso["institucion"] = _df_uso["username"].map(_mapa_user_inst).map(_instituciones_map)
+                _por_prepa = _df_uso.dropna(subset=["institucion"])["institucion"].value_counts()
+                if len(_por_prepa):
+                    for _prepa_nombre, _cant in _por_prepa.items():
+                        st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_prepa_nombre}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
+                else:
+                    st.caption("Ninguna de estas llamadas viene de cuentas ligadas a una preparatoria dada de alta.")
+            except Exception:
+                st.caption("No se pudo cruzar el consumo con preparatorias.")
+        else:
+            st.info("Sin datos de uso de API en esta ventana de tiempo todavía.")
 
 # --- VISTA: CONFIRMACIÓN DEL TUTOR (doble opt-in para cuentas de menores de edad) ---
 elif st.session_state.page == "confirmar_tutor":
