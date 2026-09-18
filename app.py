@@ -1913,7 +1913,28 @@ st.markdown(f"""
        width: 40px !important;
        height: 40px !important;
        box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+       position: relative !important;
    }}
+   /* Dibujamos nosotros las dos flechitas (»») con CSS puro, en vez de
+      depender del ícono de fuente que trae Streamlit — así nunca se ve
+      vacío ni muestra texto feo tipo "keyboard_double_arrow_right". Esta
+      es la que se ve cuando la sidebar está CERRADA (invita a abrirla). */
+   [data-testid="collapsedControl"] button span {{
+       display: none !important;
+   }}
+   [data-testid="collapsedControl"] button::before,
+   [data-testid="collapsedControl"] button::after {{
+       content: "" !important;
+       position: absolute !important;
+       top: 50% !important;
+       width: 7px !important;
+       height: 7px !important;
+       border-top: 2px solid white !important;
+       border-right: 2px solid white !important;
+       transform: translateY(-50%) rotate(45deg) !important;
+   }}
+   [data-testid="collapsedControl"] button::before {{ left: 12px !important; }}
+   [data-testid="collapsedControl"] button::after  {{ left: 18px !important; }}
 
    /* --- ESTABILIZAR LA VISTA EN CELULAR (barra superior y pie de página
       "saltando") ---
@@ -1981,15 +2002,33 @@ st.markdown(f"""
        transition: margin-left 0.25s ease, transform 0.25s ease !important;
    }}
   
-   /* Elminar el texto basura "keyboard_double..." del botón colapsable nativo de Streamlit */
+   /* Botón para RETRAER la sidebar (el de adentro, cuando ya está abierta).
+      Mismo criterio: nada de texto de ícono nativo, dibujamos «« con CSS. */
    [data-testid="stSidebarCollapseButton"] button span {{
-       font-size: 0px !important;
-       color: transparent !important;
        display: none !important;
    }}
-   [data-testid="stSidebarCollapseButton"] {{
-       background: transparent !important;
+   [data-testid="stSidebarCollapseButton"] button {{
+       background-color: #4A5D32 !important;
+       border-radius: 50% !important;
+       width: 32px !important;
+       height: 32px !important;
+       min-width: 32px !important;
+       position: relative !important;
+       box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
    }}
+   [data-testid="stSidebarCollapseButton"] button::before,
+   [data-testid="stSidebarCollapseButton"] button::after {{
+       content: "" !important;
+       position: absolute !important;
+       top: 50% !important;
+       width: 7px !important;
+       height: 7px !important;
+       border-top: 2px solid white !important;
+       border-right: 2px solid white !important;
+       transform: translateY(-50%) rotate(-135deg) !important;
+   }}
+   [data-testid="stSidebarCollapseButton"] button::before {{ left: 9px !important; }}
+   [data-testid="stSidebarCollapseButton"] button::after  {{ left: 14px !important; }}
 
 
    h1 {{
