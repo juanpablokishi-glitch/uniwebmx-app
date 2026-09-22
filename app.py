@@ -171,6 +171,63 @@ def enviar_correo_bienvenida_registro(correo_usuario: str):
     )
 
 
+def enviar_correo_invitacion_prepa(correo_destino: str, institucion_nombre: str, rol_asignado: str,
+                                    set_pass_link: str, es_cuenta_nueva: bool):
+    """Correo que se manda al dar de alta (o actualizar) un acceso de
+    profesor/institución desde 'Preparatorias y accesos'. Reutiliza el mismo
+    mecanismo de token que '¿Olvidaste tu contraseña?' (reset_token en
+    'usuarios'), solo que aquí el mensaje es de bienvenida/aviso de acceso
+    en vez de recuperación."""
+    _rol_legible = "institución (vista general)" if rol_asignado == "institucion" else "profesor/orientador"
+    if es_cuenta_nueva:
+        _intro = (
+            f"Te dimos de alta una cuenta en Uniwebmx con acceso de <strong>{_rol_legible}</strong> "
+            f"para <strong>{institucion_nombre}</strong>. Da clic abajo para armar tu contraseña y entrar "
+            f"por primera vez."
+        )
+        _titulo = "Bienvenido a Uniwebmx"
+        _boton_texto = "Armar mi contraseña"
+        _asunto = "Tu acceso a Uniwebmx esta listo"
+    else:
+        _intro = (
+            f"Tu cuenta en Uniwebmx ahora tiene acceso de <strong>{_rol_legible}</strong> para "
+            f"<strong>{institucion_nombre}</strong>. Si quieres, puedes establecer una nueva contraseña "
+            f"desde el siguiente enlace; si no haces nada, tu contraseña actual sigue funcionando igual."
+        )
+        _titulo = "Tienes un nuevo acceso"
+        _boton_texto = "Establecer contraseña"
+        _asunto = "Tu cuenta en Uniwebmx tiene un nuevo acceso"
+
+    _enviar_correo(
+        to=correo_destino,
+        subject=_asunto,
+        html=f"""
+        <div style="font-family:Montserrat,Arial,sans-serif;max-width:560px;margin:0 auto;
+            background:#ffffff;border:1px solid #EAEAEA;border-radius:16px;overflow:hidden;">
+        <div style="text-align:center;padding:28px 32px 20px;border-bottom:1px solid #EAEAEA;margin-bottom:28px;">
+            <img src="https://qbtbcvwwfqoghgvyhztd.supabase.co/storage/v1/object/public/assets/logo.png" alt="Uniwebmx" style="height:36px;display:inline-block;">
+        </div>
+            <div style="padding:0 32px 36px;">
+            <h1 style="font-size:1.4rem;font-weight:700;color:#1A1A1A;margin-bottom:0.75rem;">
+                {_titulo}
+            </h1>
+            <p style="font-size:0.95rem;color:#444;line-height:1.7;margin-bottom:1.5rem;">
+                {_intro}
+            </p>
+            <a href="{set_pass_link}" style="display:inline-block;background:#4A5D32;color:#fff;
+                font-size:0.9rem;font-weight:600;padding:13px 32px;border-radius:8px;
+                text-decoration:none;letter-spacing:0.01em;">
+                {_boton_texto}
+            </a>
+            <p style="font-size:0.78rem;color:#999;margin-top:2rem;line-height:1.6;">
+                El enlace es valido por 24 horas.<br>— El equipo de Uniwebmx
+            </p>
+            </div>
+        </div>
+        """,
+    )
+
+
 def enviar_correo_confirmacion_tutor(correo_tutor: str, nombre_tutor: str, username_alumno: str, correo_alumno: str, confirm_link: str):
     """Correo con enlace de confirmación (doble opt-in) enviado al padre/madre/tutor
     tras registrar a un alumno menor de edad. Mientras no se confirme, las
@@ -4058,16 +4115,84 @@ def _eliminar_institucion(institucion_id):
         return False, str(e)
 
 
-def _crear_acceso_institucion(correo, institucion_id, rol_asignado, nombre=""):
+def _generar_username_disponible(correo):
+    """A partir del correo genera un username libre, para cuando el admin
+    crea una cuenta directamente desde 'Preparatorias y accesos' (la persona
+    nunca pasó por el formulario de registro, así que no eligió un username
+    ella misma). Usa la parte antes del @ y le agrega un número si ya existe."""
+    import re as _re_username
+    _base = _re_username.sub(r"[^a-zA-Z0-9_]", "", correo.split("@")[0].strip().lower()) or "usuario"
+    _candidato = _base
+    _sufijo = 1
+    while supabase_client.table("usuarios").select("username").eq("username", _candidato).execute().data:
+        _sufijo += 1
+        _candidato = f"{_base}{_sufijo}"
+    return _candidato
+
+
+def _crear_acceso_institucion(correo, institucion_id, rol_asignado, nombre="", institucion_nombre="tu preparatoria"):
+    """Da de alta (o actualiza) un acceso de profesor/institución. Hace tres cosas:
+
+    1. Guarda el correo en 'accesos_institucion' (sigue sirviendo de lista
+       blanca por si la cuenta se borra y la persona se vuelve a registrar).
+    2. Si YA existe una cuenta de usuario con ese correo, le actualiza el rol
+       y la institución DE INMEDIATO (antes esto solo se aplicaba si la
+       persona se registraba de cero, y una cuenta ya existente como alumno
+       se quedaba sin cambiar). Si NO existe, crea la cuenta ahí mismo, con
+       una contraseña aleatoria que nadie llega a ver ni usar.
+    3. Manda un correo con un enlace para armar/cambiar la contraseña,
+       reutilizando el mismo mecanismo de token que '¿Olvidaste tu
+       contraseña?' (reset_token en 'usuarios').
+
+    Devuelve (ok: bool, error: str|None, es_cuenta_nueva: bool).
+    """
+    import secrets as _secrets_acc
+    _correo_norm = correo.strip().lower()
+
     try:
         supabase_client.table("accesos_institucion").insert({
-            "correo": correo.strip().lower(), "institucion_id": institucion_id,
+            "correo": _correo_norm, "institucion_id": institucion_id,
             "rol_asignado": rol_asignado, "nombre": nombre.strip(),
         }).execute()
         _cargar_accesos_institucion.clear()
-        return True, None
     except Exception as e:
-        return False, str(e)
+        return False, str(e), False
+
+    try:
+        # ilike (no .eq) porque el correo pudo haberse guardado con
+        # mayúsculas distintas al registrarse originalmente.
+        _res_existente = supabase_client.table("usuarios").select("username").ilike("email", _correo_norm).execute()
+        _es_cuenta_nueva = not _res_existente.data
+
+        if _es_cuenta_nueva:
+            _username_nuevo = _generar_username_disponible(_correo_norm)
+            _password_temporal = _secrets_acc.token_urlsafe(24)  # nadie la conoce; se reemplaza con el enlace
+            if not save_user(_username_nuevo, _password_temporal, email=_correo_norm,
+                              institucion_id=institucion_id, rol=rol_asignado):
+                return True, "El acceso se guardó, pero no se pudo crear la cuenta de usuario. Intenta de nuevo.", False
+            _username_destino = _username_nuevo
+        else:
+            _username_destino = _res_existente.data[0]["username"]
+            supabase_client.table("usuarios").update({
+                "rol": rol_asignado, "institucion_id": institucion_id,
+            }).eq("username", _username_destino).execute()
+
+        _token = _secrets_acc.token_urlsafe(32)
+        _expiry = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        supabase_client.table("usuarios").update({
+            "reset_token": _token, "reset_token_expiry": _expiry,
+        }).eq("username", _username_destino).execute()
+
+        enviar_correo_invitacion_prepa(
+            _correo_norm, institucion_nombre, rol_asignado,
+            f"{BASE_URL}/?page=reset_contrasena&token={_token}", _es_cuenta_nueva,
+        )
+        return True, None, _es_cuenta_nueva
+    except Exception as e:
+        # El acceso ya quedó guardado en accesos_institucion aunque esto falle;
+        # no perdemos el registro, solo no se creó/actualizó la cuenta o no
+        # se pudo mandar el correo.
+        return True, f"El acceso se guardó, pero algo falló al preparar la cuenta o el correo: {e}", False
 
 
 def _eliminar_acceso_institucion(acceso_id):
@@ -6497,13 +6622,18 @@ elif st.session_state.page == "panel_instituciones":
                     if not _a_correo.strip():
                         st.error("Escribe el correo.")
                     else:
-                        _ok, _err = _crear_acceso_institucion(_a_correo, _inst["id"], _a_rol, _a_nombre)
-                        if _ok:
-                            st.success(f"Acceso agregado para {_a_correo}. La próxima vez que inicie sesión (o si se registra hoy) con ese correo, entrará como {_a_rol}.")
+                        _ok, _err, _es_nueva = _crear_acceso_institucion(_a_correo, _inst["id"], _a_rol, _a_nombre, _inst["nombre"])
+                        if _ok and not _err:
+                            if _es_nueva:
+                                st.success(f"Cuenta creada para {_a_correo} con acceso de {_a_rol}. Le llegó un correo para armar su contraseña.")
+                            else:
+                                st.success(f"{_a_correo} ya tenía cuenta — se actualizó su rol a {_a_rol} de inmediato, y le llegó un correo por si quiere poner una contraseña nueva.")
                             st.rerun()
+                        elif _ok and _err:
+                            st.warning(_err)
                         else:
                             st.error(f"No se pudo agregar. Error de Supabase: {_err}")
-        st.caption("Nota: si un profesor ya tenía cuenta de alumno antes de que lo agregaras aquí, su rol no cambia solo — bórralo desde 'Usuarios y roles' y dile que se vuelva a registrar, o cambia su rol ahí directamente.")
+        st.caption("Al agregar un acceso: si la persona ya tenía cuenta, su rol cambia de inmediato; si no, se le crea la cuenta ahí mismo. En ambos casos le llega un correo para armar/actualizar su contraseña.")
 
 # --- VISTA: PANEL DE LA PREPARATORIA (institución / profesor) ---
 elif st.session_state.page == "panel_prepa":
