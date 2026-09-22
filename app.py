@@ -2763,13 +2763,39 @@ if es_hub or es_panel:
    #uniwebmx-sidebar-toggle span::before { top: -5px; }
    #uniwebmx-sidebar-toggle span::after { top: 5px; }
    </style>
-   <div id="uniwebmx-sidebar-toggle" title="Mostrar/ocultar menú"
-        onclick="var c=document.querySelector('[data-testid=collapsedControl] button');
-                 var e=document.querySelector('[data-testid=stSidebarCollapseButton] button');
-                 if (c) { c.click(); } else if (e) { e.click(); }">
+   <div id="uniwebmx-sidebar-toggle" title="Mostrar/ocultar menú">
        <span></span>
    </div>
    """, unsafe_allow_html=True)
+
+   # st.markdown() sanea el HTML y elimina atributos tipo onclick="" aunque
+   # unsafe_allow_html=True esté activo (por eso el onclick de la versión
+   # anterior nunca se ejecutaba: el botón se veía, pero no hacía nada).
+   # Igual que con los metatags de PWA/SEO más arriba, para JS que sí se
+   # ejecute hace falta components.html(), que corre en un iframe real y
+   # puede escribir/leer window.parent.document. Aquí conectamos el click
+   # del botón a los controles nativos de la sidebar. Se asigna con
+   # ".onclick =" (no addEventListener) para que, aunque este bloque se
+   # vuelva a correr en cada rerun de Streamlit, no se vayan acumulando
+   # handlers duplicados sobre el mismo botón.
+   components.html("""
+   <script>
+   (function() {
+       var doc = window.parent.document;
+       var boton = doc.getElementById('uniwebmx-sidebar-toggle');
+       if (!boton) return;
+       boton.onclick = function() {
+           var abrir  = doc.querySelector('[data-testid="collapsedControl"] button');
+           var cerrar = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
+           if (abrir) {
+               abrir.click();
+           } else if (cerrar) {
+               cerrar.click();
+           }
+       };
+   })();
+   </script>
+   """, height=0, width=0)
 
 
 # =================================================================
