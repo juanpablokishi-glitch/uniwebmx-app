@@ -2702,6 +2702,74 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
+# =================================================================
+# BOTÓN PROPIO PARA MOSTRAR/OCULTAR LA SIDEBAR (Hub y Panel)
+# =================================================================
+# El botón nativo de Streamlit para abrir/cerrar la sidebar
+# (collapsedControl cuando está cerrada, stSidebarCollapseButton cuando
+# está abierta) no siempre se ve de forma confiable — según navegador,
+# tema o el resto de nuestro CSS, puede terminar tapado o sin renderizar.
+# En vez de perseguir ese problema, ponemos un botón propio, fijo y
+# siempre visible, que simplemente le hace clic al botón nativo que
+# corresponda en cada momento (así reusamos la lógica de Streamlit de
+# abrir/cerrar la sidebar, sin reimplementarla). Los botones nativos se
+# ocultan visualmente para no duplicar el control, pero siguen en el DOM
+# — un elemento con display:none igual puede "clickearse" por JS — así
+# que el toggle sigue funcionando exactamente igual.
+if es_hub or es_panel:
+   st.markdown("""
+   <style>
+   [data-testid="collapsedControl"],
+   [data-testid="stSidebarCollapseButton"] {
+       display: none !important;
+   }
+   #uniwebmx-sidebar-toggle {
+       position: fixed;
+       top: 10px;
+       left: 10px;
+       width: 38px;
+       height: 38px;
+       border-radius: 50%;
+       background-color: #4A5D32;
+       display: flex;
+       align-items: center;
+       justify-content: center;
+       cursor: pointer;
+       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+       z-index: 1000000;
+       transition: background-color 0.15s ease;
+   }
+   #uniwebmx-sidebar-toggle:hover {
+       background-color: #3a4a27;
+   }
+   #uniwebmx-sidebar-toggle span {
+       display: block;
+       width: 16px;
+       height: 2px;
+       background: #FFFFFF;
+       border-radius: 2px;
+       position: relative;
+   }
+   #uniwebmx-sidebar-toggle span::before,
+   #uniwebmx-sidebar-toggle span::after {
+       content: "";
+       position: absolute;
+       left: 0;
+       width: 16px;
+       height: 2px;
+       background: #FFFFFF;
+       border-radius: 2px;
+   }
+   #uniwebmx-sidebar-toggle span::before { top: -5px; }
+   #uniwebmx-sidebar-toggle span::after { top: 5px; }
+   </style>
+   <div id="uniwebmx-sidebar-toggle" title="Mostrar/ocultar menú"
+        onclick="var c=document.querySelector('[data-testid=collapsedControl] button');
+                 var e=document.querySelector('[data-testid=stSidebarCollapseButton] button');
+                 if (c) { c.click(); } else if (e) { e.click(); }">
+       <span></span>
+   </div>
+   """, unsafe_allow_html=True)
 
 
 # =================================================================
