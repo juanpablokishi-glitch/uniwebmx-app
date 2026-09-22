@@ -837,7 +837,7 @@ def _tutor_confirmado_fresco(username):
 PANEL_ADMIN_PAGES = [
     "panel_admin", "panel_chat", "panel_simulador",
     "panel_carreras", "panel_perfiles", "panel_carreras_perfiles", "panel_consultor", "panel_usuarios",
-    "panel_blog", "panel_prepa", "panel_instituciones", "panel_errores_apis",
+    "panel_blog", "panel_prepa", "panel_instituciones", "panel_errores", "panel_apis",
 ]
 
 
@@ -1825,7 +1825,7 @@ elif st.session_state.page == "panel_blog" and not es_admin():
 elif st.session_state.page == "panel_instituciones" and not es_admin():
     # Configurar preparatorias/accesos es exclusivo del equipo de Uniwebmx.
     st.session_state.page = "panel_prepa" if es_staff_prepa() else "panel_admin"
-elif st.session_state.page == "panel_errores_apis" and not es_admin():
+elif st.session_state.page in ("panel_errores", "panel_apis") and not es_admin():
     # Igual: es información técnica interna, no algo para universidades/prepas.
     st.session_state.page = "panel_prepa" if es_staff_prepa() else "panel_admin"
 elif st.session_state.page == "panel_prepa" and not (es_staff_prepa() or es_admin()):
@@ -2939,7 +2939,7 @@ if es_hub:
            .profile-menu {{
                display: none;
                position: fixed;
-               bottom: 62px;
+               bottom: calc(62px + env(safe-area-inset-bottom, 0px));
                left: 8px;
                width: 236px;
                background: #fff;
@@ -2949,6 +2949,7 @@ if es_hub:
                z-index: 99999;
                padding: 6px 0;
                font-family: Montserrat, sans-serif;
+               transform: translateZ(0);
            }}
            #profile-toggle:checked ~ .sidebar-bottom-bar .profile-menu {{
                display: block;
@@ -2965,9 +2966,16 @@ if es_hub:
                width: 252px;
                background: #fff;
                border-top: 0.5px solid #EAEAEA;
-               padding: 10px 12px;
+               padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
                z-index: 9998;
                box-sizing: border-box;
+               /* Capa GPU propia: sin esto, en celular el brincoteo de la
+                  barra de direcciones del navegador al hacer scroll fuerza
+                  un repintado de este elemento junto con el resto de la
+                  página, y se siente como que "tiembla". Mismo arreglo que
+                  ya usamos en el header nativo de Streamlit. */
+               transform: translateZ(0);
+               will-change: auto;
            }}
            .profile-btn {{
                display: flex;
@@ -3158,6 +3166,7 @@ if es_panel:
    _icon_blog       = '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/>'
    _icon_instituciones = '<path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/>'
    _icon_errores = '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>'
+   _icon_api = '<circle cx="12" cy="12" r="2"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>'
 
    with st.sidebar:
        if es_staff_prepa():
@@ -3213,7 +3222,8 @@ if es_panel:
               f'{_sb_item_panel("Usuarios y roles", "panel_usuarios", _icon_usuarios)}'
               f'{_sb_item_panel("Blog", "panel_blog", _icon_blog)}'
               f'{_sb_item_panel("Preparatorias y accesos", "panel_instituciones", _icon_instituciones)}'
-              f'{_sb_item_panel("Errores y APIs", "panel_errores_apis", _icon_errores)}'
+              f'{_sb_item_panel("Errores", "panel_errores", _icon_errores)}'
+              f'{_sb_item_panel("Uso de API", "panel_apis", _icon_api)}'
               f'</div>'
               if es_admin() else "")
            + """
@@ -6599,85 +6609,98 @@ elif st.session_state.page == "panel_prepa":
                     else:
                         st.error("No se pudo calcular en este momento. Intenta de nuevo en un momento.")
 
-# --- VISTA: ERRORES Y APIs (administración) ---
-elif st.session_state.page == "panel_errores_apis":
-    _panel_header("Errores y APIs", "Bugs recientes en tiempo real y consumo de la API de Gemini.")
+# --- VISTA: ERRORES (administración) ---
+elif st.session_state.page == "panel_errores":
+    _panel_header("Errores", "Bugs recientes en tiempo real, capturados automáticamente por la app.")
 
-    _tab_errores, _tab_apis = st.tabs(["🐛 Errores", "📡 Uso de API"])
+    _solo_no_resueltos = st.checkbox("Mostrar solo pendientes", value=True, key="chk_solo_no_resueltos")
+    try:
+        _q_errores = supabase_client.table("log_errores").select("*").order("creado_en", desc=True).limit(100)
+        if _solo_no_resueltos:
+            _q_errores = _q_errores.eq("resuelto", False)
+        _errores_data = _q_errores.execute().data or []
+    except Exception as e:
+        _errores_data = []
+        st.info("Todavía no existe la tabla 'log_errores' en Supabase, o está vacía. Corre el SQL indicado en el comentario de `_notificar_error_admin` para activarla.")
 
-    with _tab_errores:
-        _solo_no_resueltos = st.checkbox("Mostrar solo pendientes", value=True, key="chk_solo_no_resueltos")
+    if _errores_data:
+        st.caption(f"{len(_errores_data)} error(es) mostrados (últimos 100 máximo).")
+        for _err_row in _errores_data:
+            _fecha_err = (_err_row.get("creado_en") or "")[:19].replace("T", " ")
+            _resuelto_row = bool(_err_row.get("resuelto"))
+            # Punto de estado dibujado con CSS (rojo = pendiente, verde = resuelto)
+            # en vez de un emoji — mismo criterio que los indicadores de la sidebar.
+            _color_punto = "#8FAE6B" if _resuelto_row else "#C0392B"
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:8px;margin-top:14px;'>"
+                f"<span style='width:8px;height:8px;border-radius:50%;background:{_color_punto};"
+                f"flex-shrink:0;'></span>"
+                f"<strong style='font-size:0.88rem;color:#1A1A1A;'>{_err_row.get('contexto', '(sin contexto)')}</strong>"
+                f"<span style='font-size:0.78rem;color:#999;'>— {_fecha_err}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            with st.expander("Ver detalle"):
+                st.code(_err_row.get("error", ""), language=None)
+                if _err_row.get("extra"):
+                    st.caption(f"Extra: {_err_row['extra']}")
+                if not _resuelto_row:
+                    if st.button("Marcar como resuelto", key=f"resolver_err_{_err_row['id']}"):
+                        try:
+                            supabase_client.table("log_errores").update({"resuelto": True}).eq("id", _err_row["id"]).execute()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo actualizar: {e}")
+    elif _solo_no_resueltos:
+        st.success("Sin errores pendientes.")
+
+# --- VISTA: USO DE API (administración) ---
+elif st.session_state.page == "panel_apis":
+    _panel_header("Uso de API", "Consumo de la API de Gemini por alumno y por preparatoria.")
+
+    _dias_ventana = st.selectbox("Ventana de tiempo", [7, 14, 30, 90], index=2, format_func=lambda d: f"Últimos {d} días", key="sel_dias_uso_api")
+    try:
+        _fecha_desde = (datetime.now(timezone.utc) - timedelta(days=_dias_ventana)).isoformat()
+        _res_uso = supabase_client.table("log_uso_api").select("username, tipo, creado_en").gte("creado_en", _fecha_desde).limit(20000).execute()
+        _uso_data = _res_uso.data or []
+    except Exception:
+        _uso_data = []
+        st.info("Todavía no existe la tabla 'log_uso_api' en Supabase, o está vacía. Revisa el comentario junto a `_log_uso_api` para el SQL.")
+
+    if _uso_data:
+        _df_uso = pd.DataFrame(_uso_data)
+        c_api1, c_api2, c_api3 = st.columns(3)
+        c_api1.metric("Llamadas totales", len(_df_uso))
+        c_api2.metric("Alumnos/cuentas distintas", _df_uso["username"].nunique())
+        c_api3.metric("Promedio diario", round(len(_df_uso) / max(_dias_ventana, 1), 1))
+
+        st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Llamadas por tipo</strong></div>", unsafe_allow_html=True)
+        _por_tipo = _df_uso["tipo"].value_counts()
+        for _tipo_nombre, _cant in _por_tipo.items():
+            st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_tipo_nombre}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
+
+        st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Top 10 cuentas con más consumo</strong></div>", unsafe_allow_html=True)
+        _top_users = _df_uso["username"].value_counts().head(10)
+        for _un, _cant in _top_users.items():
+            st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_un}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
+
+        # --- Consumo por preparatoria ---
+        st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Consumo por preparatoria</strong></div>", unsafe_allow_html=True)
         try:
-            _q_errores = supabase_client.table("log_errores").select("*").order("creado_en", desc=True).limit(100)
-            if _solo_no_resueltos:
-                _q_errores = _q_errores.eq("resuelto", False)
-            _errores_data = _q_errores.execute().data or []
-        except Exception as e:
-            _errores_data = []
-            st.info("Todavía no existe la tabla 'log_errores' en Supabase, o está vacía. Corre el SQL indicado en el comentario de `_notificar_error_admin` para activarla.")
-
-        if _errores_data:
-            st.caption(f"{len(_errores_data)} error(es) mostrados (últimos 100 máximo).")
-            for _err_row in _errores_data:
-                _fecha_err = (_err_row.get("creado_en") or "")[:19].replace("T", " ")
-                with st.expander(f"🔴 {_err_row.get('contexto', '(sin contexto)')} — {_fecha_err}"):
-                    st.code(_err_row.get("error", ""), language=None)
-                    if _err_row.get("extra"):
-                        st.caption(f"Extra: {_err_row['extra']}")
-                    if not _err_row.get("resuelto"):
-                        if st.button("✅ Marcar como resuelto", key=f"resolver_err_{_err_row['id']}"):
-                            try:
-                                supabase_client.table("log_errores").update({"resuelto": True}).eq("id", _err_row["id"]).execute()
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"No se pudo actualizar: {e}")
-        elif _solo_no_resueltos:
-            st.success("Sin errores pendientes. 🎉")
-
-    with _tab_apis:
-        _dias_ventana = st.selectbox("Ventana de tiempo", [7, 14, 30, 90], index=2, format_func=lambda d: f"Últimos {d} días", key="sel_dias_uso_api")
-        try:
-            _fecha_desde = (datetime.now(timezone.utc) - timedelta(days=_dias_ventana)).isoformat()
-            _res_uso = supabase_client.table("log_uso_api").select("username, tipo, creado_en").gte("creado_en", _fecha_desde).limit(20000).execute()
-            _uso_data = _res_uso.data or []
+            _res_usuarios_inst = supabase_client.table("usuarios").select("username, institucion_id").not_.is_("institucion_id", "null").execute()
+            _mapa_user_inst = {r["username"]: r["institucion_id"] for r in (_res_usuarios_inst.data or [])}
+            _instituciones_map = {i["id"]: i["nombre"] for i in _cargar_instituciones()}
+            _df_uso["institucion"] = _df_uso["username"].map(_mapa_user_inst).map(_instituciones_map)
+            _por_prepa = _df_uso.dropna(subset=["institucion"])["institucion"].value_counts()
+            if len(_por_prepa):
+                for _prepa_nombre, _cant in _por_prepa.items():
+                    st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_prepa_nombre}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
+            else:
+                st.caption("Ninguna de estas llamadas viene de cuentas ligadas a una preparatoria dada de alta.")
         except Exception:
-            _uso_data = []
-            st.info("Todavía no existe la tabla 'log_uso_api' en Supabase, o está vacía. Revisa el comentario junto a `_log_uso_api` para el SQL.")
-
-        if _uso_data:
-            _df_uso = pd.DataFrame(_uso_data)
-            c_api1, c_api2, c_api3 = st.columns(3)
-            c_api1.metric("Llamadas totales", len(_df_uso))
-            c_api2.metric("Alumnos/cuentas distintas", _df_uso["username"].nunique())
-            c_api3.metric("Promedio diario", round(len(_df_uso) / max(_dias_ventana, 1), 1))
-
-            st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Llamadas por tipo</strong></div>", unsafe_allow_html=True)
-            _por_tipo = _df_uso["tipo"].value_counts()
-            for _tipo_nombre, _cant in _por_tipo.items():
-                st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_tipo_nombre}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
-
-            st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Top 10 cuentas con más consumo</strong></div>", unsafe_allow_html=True)
-            _top_users = _df_uso["username"].value_counts().head(10)
-            for _un, _cant in _top_users.items():
-                st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_un}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
-
-            # --- Consumo por preparatoria ---
-            st.markdown("<div style='margin:1.5rem 0 0.5rem;'><strong style='font-size:0.85rem;'>Consumo por preparatoria</strong></div>", unsafe_allow_html=True)
-            try:
-                _res_usuarios_inst = supabase_client.table("usuarios").select("username, institucion_id").not_.is_("institucion_id", "null").execute()
-                _mapa_user_inst = {r["username"]: r["institucion_id"] for r in (_res_usuarios_inst.data or [])}
-                _instituciones_map = {i["id"]: i["nombre"] for i in _cargar_instituciones()}
-                _df_uso["institucion"] = _df_uso["username"].map(_mapa_user_inst).map(_instituciones_map)
-                _por_prepa = _df_uso.dropna(subset=["institucion"])["institucion"].value_counts()
-                if len(_por_prepa):
-                    for _prepa_nombre, _cant in _por_prepa.items():
-                        st.markdown(f"<div style='display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #F0F0F0;font-size:0.88rem;'><span>{_prepa_nombre}</span><span style='color:#4A5D32;font-weight:600;'>{_cant}</span></div>", unsafe_allow_html=True)
-                else:
-                    st.caption("Ninguna de estas llamadas viene de cuentas ligadas a una preparatoria dada de alta.")
-            except Exception:
-                st.caption("No se pudo cruzar el consumo con preparatorias.")
-        else:
-            st.info("Sin datos de uso de API en esta ventana de tiempo todavía.")
+            st.caption("No se pudo cruzar el consumo con preparatorias.")
+    else:
+        st.info("Sin datos de uso de API en esta ventana de tiempo todavía.")
 
 # --- VISTA: CONFIRMACIÓN DEL TUTOR (doble opt-in para cuentas de menores de edad) ---
 elif st.session_state.page == "confirmar_tutor":
